@@ -76,6 +76,7 @@ function App() {
           bgcolor: "background.paper",
           borderBottom: 1,
           borderColor: "divider",
+          pt: "env(safe-area-inset-top, 24px)",
         }}
       >
         <Toolbar sx={{ minHeight: 56 }}>
@@ -126,7 +127,17 @@ function App() {
         }}
       >
         {/* Drawer header */}
-        <Box sx={{ p: 2, pb: 1, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <Box
+          sx={{
+            pl: 2,
+            pr: 2,
+            pb: 1,
+            pt: "calc(env(safe-area-inset-top, 24px) + 16px)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+          }}
+        >
           <Box>
             <Typography variant="h6" fontWeight={700}>
               OxiDock

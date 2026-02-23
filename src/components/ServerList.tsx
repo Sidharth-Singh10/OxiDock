@@ -25,7 +25,6 @@ import {
 import DnsIcon from "@mui/icons-material/Dns";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
-import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import StorageIcon from "@mui/icons-material/Storage";
 import type { KeyInfo, ServerConfig } from "../lib/types";
 import {
@@ -283,34 +282,29 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                 key={server.id}
                 disablePadding
                 secondaryAction={
-                  <Box sx={{ display: "flex", gap: 0.5, alignItems: "center" }}>
-                    {connecting === server.id ? (
-                      <Typography variant="caption" color="primary">
-                        Connecting...
-                      </Typography>
-                    ) : (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleConnect(server);
-                        }}
-                      >
-                        Connect
-                      </Button>
-                    )}
-                    <IconButton
-                      color="error"
+                  connecting === server.id ? (
+                    <Typography variant="caption" color="primary">
+                      Connecting...
+                    </Typography>
+                  ) : (
+                    <Button
                       size="small"
+                      variant="outlined"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleRemoveServer(server.id);
+                        handleConnect(server);
+                      }}
+                      sx={{
+                        borderRadius: "20px",
+                        textTransform: "none",
+                        fontWeight: 500,
+                        px: 2,
+                        mr: -1,
                       }}
                     >
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
+                      Connect
+                    </Button>
+                  )
                 }
               >
                 <ListItemButton
