@@ -27,6 +27,11 @@ pub async fn delete_key(key_store: State<'_, Arc<KeyStore>>, name: String) -> Ap
     key_store.delete_key(&name).await
 }
 
+#[tauri::command]
+pub async fn get_key(key_store: State<'_, Arc<KeyStore>>, name: String) -> AppResult<String> {
+    key_store.retrieve_key_pem(&name).await
+}
+
 // ─── SSH Session Commands ─────────────────────────────────────────────
 
 #[tauri::command]

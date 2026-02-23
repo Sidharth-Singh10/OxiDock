@@ -7,6 +7,7 @@
     "npm:@mui/material@^6.4.6": "6.5.0_@emotion+react@11.14.0__react@18.3.1_@emotion+styled@11.14.1__@emotion+react@11.14.0___react@18.3.1__react@18.3.1_@types+react@18.3.28_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@tauri-apps/api@2": "2.10.1",
     "npm:@tauri-apps/cli@2": "2.10.0",
+    "npm:@tauri-apps/plugin-biometric@^2.3.2": "2.3.2",
     "npm:@tauri-apps/plugin-opener@2": "2.5.3",
     "npm:@tauri-apps/plugin-stronghold@^2.3.1": "2.3.1",
     "npm:@types/react-dom@^18.3.1": "18.3.7_@types+react@18.3.28",
@@ -735,6 +736,12 @@
       ],
       "bin": true
     },
+    "@tauri-apps/plugin-biometric@2.3.2": {
+      "integrity": "sha512-RFydYGKEJ6m4UWdcPsO+vJQUb3JyyfFeNoZSPDs0uWjvwHBs03xey5wWO+uowmFFy03JAff1l2idQAwuycO8Uw==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
     "@tauri-apps/plugin-opener@2.5.3": {
       "integrity": "sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==",
       "dependencies": [
@@ -1245,6 +1252,7 @@
         "npm:@mui/material@^6.4.6",
         "npm:@tauri-apps/api@2",
         "npm:@tauri-apps/cli@2",
+        "npm:@tauri-apps/plugin-biometric@^2.3.2",
         "npm:@tauri-apps/plugin-opener@2",
         "npm:@tauri-apps/plugin-stronghold@^2.3.1",
         "npm:@types/react-dom@^18.3.1",

@@ -28,12 +28,16 @@ pub fn run() {
             app.manage(key_store);
             app.manage(session_mgr);
 
+            #[cfg(mobile)]
+            app.handle().plugin(tauri_plugin_biometric::init())?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::store_key,
             commands::list_keys,
             commands::delete_key,
+            commands::get_key,
             commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_list_sessions,

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, forwardRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Alert,
   Box,
   CircularProgress,
   Dialog,
@@ -12,6 +13,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Snackbar,
   Stack,
   TextField,
   Typography,
@@ -21,7 +23,9 @@ import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import CloseIcon from "@mui/icons-material/Close";
+import FingerprintIcon from "@mui/icons-material/Fingerprint";
 import type { KeyInfo } from "../lib/types";
+import { checkBiometricAvailable, requireBiometric } from "../lib/useBiometric";
 
 /* ── Center scale + fade transition ─────────────────────────────── */
 const GrowTransition = forwardRef(function GrowTransition(
@@ -49,6 +53,9 @@ export default function KeyManager() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [snackMsg, setSnackMsg] = useState<string | null>(null);
+  const [viewingKey, setViewingKey] = useState<KeyInfo | null>(null);
+  const [viewingKeyPem, setViewingKeyPem] = useState<string | null>(null);
 
   const loadKeys = useCallback(async () => {
     try {
@@ -63,7 +70,26 @@ export default function KeyManager() {
     loadKeys();
   }, [loadKeys]);
 
-  const handleOpenForm = () => {
+  const handleOpenForm = async () => {
+    try {
+      // First key? Check biometric hardware is available
+      if (keys.length === 0) {
+        const { available, error: bioErr } = await checkBiometricAvailable();
+        if (!available) {
+          setSnackMsg(
+            `Biometric authentication is required but not available: ${
+              bioErr ?? "unknown reason"
+            }. Please enable biometrics in your device settings.`
+          );
+          return;
+        }
+      }
+      // Always require biometric auth before opening the form
+      await requireBiometric("Authenticate to add SSH key");
+    } catch {
+      // User cancelled or auth failed — silently abort
+      return;
+    }
     setName("");
     setKeyPem("");
     setError(null);
@@ -91,10 +117,30 @@ export default function KeyManager() {
 
   const handleDeleteKey = async (keyName: string) => {
     try {
+      await requireBiometric("Authenticate to delete SSH key");
+    } catch {
+      return;
+    }
+    try {
       await invoke("delete_key", { name: keyName });
       await loadKeys();
     } catch (e) {
       setError(String(e));
+    }
+  };
+
+  const handleViewKey = async (key: KeyInfo) => {
+    try {
+      await requireBiometric("Authenticate to view key details");
+    } catch {
+      return;
+    }
+    try {
+      const pem = await invoke<string>("get_key", { name: key.name });
+      setViewingKeyPem(pem);
+      setViewingKey(key);
+    } catch (e) {
+      setSnackMsg(String(e));
     }
   };
 
@@ -150,7 +196,7 @@ export default function KeyManager() {
                 </IconButton>
               }
             >
-              <ListItemButton sx={{ minHeight: 56 }}>
+              <ListItemButton sx={{ minHeight: 56 }} onClick={() => handleViewKey(key)}>
                 <ListItemIcon sx={{ minWidth: 52 }}>
                   <Box
                     sx={{
@@ -383,6 +429,157 @@ export default function KeyManager() {
           </Stack>
         </Stack>
       </Dialog>
+
+      {/* ── Key detail dialog (after biometric auth) ────────────── */}
+      <Dialog
+        open={!!viewingKey}
+        onClose={() => {
+          setViewingKey(null);
+          setViewingKeyPem(null);
+        }}
+        TransitionComponent={GrowTransition}
+        keepMounted={false}
+        fullWidth
+        maxWidth="sm"
+        PaperProps={{
+          sx: {
+            m: 2,
+            borderRadius: "20px",
+            bgcolor: "background.paper",
+            backgroundImage: "none",
+            maxHeight: "80dvh",
+          },
+        }}
+        sx={{
+          "& .MuiDialog-container": {
+            alignItems: "center",
+            justifyContent: "center",
+          },
+          "& .MuiBackdrop-root": {
+            backgroundColor: "rgba(0,0,0,0.45)",
+            backdropFilter: "blur(4px)",
+            transition: "opacity 0.35s ease !important",
+          },
+        }}
+      >
+        {/* Top pill accent */}
+        <Box sx={{ display: "flex", justifyContent: "center", pt: 1.5, pb: 0.5 }}>
+          <Box
+            sx={{
+              width: 36,
+              height: 4,
+              borderRadius: 2,
+              bgcolor: "text.secondary",
+              opacity: 0.25,
+            }}
+          />
+        </Box>
+
+        {/* Header */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            px: 2.5,
+            pb: 1,
+          }}
+        >
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <FingerprintIcon sx={{ color: "success.main", fontSize: 22 }} />
+            <Typography variant="h6" fontWeight={700} sx={{ fontSize: "1.1rem" }}>
+              Key Details
+            </Typography>
+          </Box>
+          <IconButton
+            size="small"
+            onClick={() => setViewingKey(null)}
+            sx={{
+              color: "text.secondary",
+              bgcolor: "action.hover",
+              "&:hover": { bgcolor: "action.selected" },
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        {/* Body */}
+        {viewingKey && (
+          <Stack spacing={2} sx={{ px: 2.5, pb: 3, pt: 0.5 }}>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Name
+              </Typography>
+              <Typography variant="body1" fontWeight={600}>
+                {viewingKey.name}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Fingerprint
+              </Typography>
+              <Typography
+                variant="body2"
+                fontFamily="monospace"
+                sx={{ wordBreak: "break-all" }}
+              >
+                {viewingKey.fingerprint}
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Created
+              </Typography>
+              <Typography variant="body2">
+                {new Date(viewingKey.created_at).toLocaleString()}
+              </Typography>
+            </Box>
+            {viewingKeyPem && (
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Secret Key (PEM)
+                </Typography>
+                <Box
+                  sx={{
+                    p: 1.5,
+                    mt: 0.5,
+                    bgcolor: "action.hover",
+                    borderRadius: 2,
+                    maxHeight: 200,
+                    overflowY: "auto",
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    fontFamily="monospace"
+                    sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}
+                  >
+                    {viewingKeyPem}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+          </Stack>
+        )}
+      </Dialog>
+
+      {/* ── Snackbar for biometric errors ───────────────────────── */}
+      <Snackbar
+        open={!!snackMsg}
+        autoHideDuration={5000}
+        onClose={() => setSnackMsg(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={() => setSnackMsg(null)}
+          severity="warning"
+          variant="filled"
+          sx={{ width: "100%", borderRadius: "14px" }}
+        >
+          {snackMsg}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
