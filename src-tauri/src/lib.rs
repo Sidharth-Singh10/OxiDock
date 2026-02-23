@@ -20,6 +20,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_dir = app
                 .path()
@@ -51,6 +52,7 @@ pub fn run() {
             commands::sftp_list_dir,
             commands::sftp_read_file_preview,
             commands::sftp_download_file,
+            commands::sftp_save_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

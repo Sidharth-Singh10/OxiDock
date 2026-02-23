@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "biometric:default"
+    "biometric:default",
+    "dialog:default"
   ]
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 
-use crate::errors::AppResult;
+use crate::errors::{AppError, AppResult};
 use crate::key_store::{KeyInfo, KeyStore, KeyType, SUPPORTED_KEY_TYPES};
 use crate::sftp_ops::{self, FileEntry, FilePreview};
 use crate::ssh_manager::SshSessionManager;
@@ -148,6 +148,84 @@ pub async fn sftp_download_file(
         start.elapsed().as_secs_f64() * 1000.0,
     );
     result
+}
+
+#[tauri::command]
+pub async fn sftp_save_file(
+    app: tauri::AppHandle,
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    remote_path: String,
+    file_name: String,
+) -> AppResult<String> {
+    let start = std::time::Instant::now();
+
+    let save_dir = if cfg!(target_os = "android") {
+        let public = std::path::PathBuf::from("/storage/emulated/0/Download");
+        if public.exists() && std::fs::metadata(&public).map(|m| !m.permissions().readonly()).unwrap_or(false) {
+            public
+        } else {
+            app.path()
+                .download_dir()
+                .or_else(|_| app.path().app_data_dir())
+                .map_err(|e| AppError::Sftp(format!("Cannot determine save directory: {e}")))?
+        }
+    } else {
+        app.path()
+            .download_dir()
+            .or_else(|_| app.path().document_dir())
+            .or_else(|_| app.path().app_data_dir())
+            .map_err(|e| AppError::Sftp(format!("Cannot determine save directory: {e}")))?
+    };
+
+    std::fs::create_dir_all(&save_dir)
+        .map_err(|e| AppError::Sftp(format!("Cannot create save directory: {e}")))?;
+
+    let mut local_path = save_dir.join(&file_name);
+    if local_path.exists() {
+        let stem = local_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&file_name)
+            .to_string();
+        let ext = local_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut counter = 1u32;
+        loop {
+            let new_name = if ext.is_empty() {
+                format!("{stem} ({counter})")
+            } else {
+                format!("{stem} ({counter}).{ext}")
+            };
+            local_path = save_dir.join(&new_name);
+            if !local_path.exists() {
+                break;
+            }
+            counter += 1;
+        }
+    }
+
+    let local_str = local_path.to_string_lossy().to_string();
+    log::debug!(
+        "[CMD] sftp_save_file called — remote=\"{}\" local=\"{}\"",
+        remote_path,
+        local_str,
+    );
+
+    let session = session_mgr.get_session(&session_id).await?;
+    sftp_ops::save_file(&session, &remote_path, &local_str).await?;
+
+    log::info!(
+        "[CMD] sftp_save_file \"{}\" -> \"{}\" — total_cmd: {:.2}ms",
+        remote_path,
+        local_str,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+
+    Ok(local_str)
 }
 
 // ─── Helper types ─────────────────────────────────────────────────────

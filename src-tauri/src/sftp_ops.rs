@@ -147,6 +147,33 @@ pub async fn download_file(session: &Arc<SshSession>, path: &str) -> AppResult<V
     Ok(data)
 }
 
+/// Download a remote file via SFTP and save it to a local path.
+pub async fn save_file(session: &Arc<SshSession>, remote_path: &str, local_path: &str) -> AppResult<u64> {
+    let start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+
+    let data = sftp
+        .read(remote_path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to download file: {e}")))?;
+
+    let size = data.len() as u64;
+
+    tokio::fs::write(local_path, &data)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to write local file: {e}")))?;
+
+    log::info!(
+        "[PERF] save_file \"{}\" -> \"{}\" — {:.2}ms | size: {} bytes",
+        remote_path,
+        local_path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        size,
+    );
+
+    Ok(size)
+}
+
 /// Preview result returned to the frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct FilePreview {

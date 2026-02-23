@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Box,
@@ -12,10 +12,14 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Menu,
+  MenuItem,
+  Snackbar,
   Stack,
   Typography,
 } from "@mui/material";
 import FolderIcon from "@mui/icons-material/Folder";
+import DownloadIcon from "@mui/icons-material/Download";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
@@ -52,6 +56,14 @@ export default function FileBrowser({
     data: FilePreviewType;
     name: string;
   } | null>(null);
+  const [snackbar, setSnackbar] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    entry: FileEntry;
+    anchorEl: HTMLElement;
+  } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
 
   const loadDir = useCallback(
     async (dirPath: string) => {
@@ -91,6 +103,40 @@ export default function FileBrowser({
       } catch (e) {
         setError(`Failed to preview: ${e}`);
       }
+    }
+  };
+
+  const clearLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const startLongPress = (entry: FileEntry, target: HTMLElement) => {
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setContextMenu({ entry, anchorEl: target });
+    }, 500);
+  };
+
+  const handleDownloadFromMenu = async () => {
+    if (!contextMenu) return;
+    const entry = contextMenu.entry;
+    setContextMenu(null);
+    try {
+      setDownloading(true);
+      const savedPath = await invoke<string>("sftp_save_file", {
+        sessionId,
+        remotePath: entry.path,
+        fileName: entry.name,
+      });
+      setSnackbar(`Saved to ${savedPath}`);
+    } catch (err) {
+      setSnackbar(`Download failed: ${err}`);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -246,7 +292,20 @@ export default function FileBrowser({
             {entries.map((entry) => (
               <ListItem key={entry.path} disablePadding>
                 <ListItemButton
-                  onClick={() => handleEntryClick(entry)}
+                  onClick={() => {
+                    if (longPressTriggered.current) return;
+                    handleEntryClick(entry);
+                  }}
+                  onMouseDown={(e) => startLongPress(entry, e.currentTarget)}
+                  onMouseUp={clearLongPress}
+                  onMouseLeave={clearLongPress}
+                  onTouchStart={(e) => startLongPress(entry, e.currentTarget)}
+                  onTouchEnd={clearLongPress}
+                  onTouchCancel={clearLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({ entry, anchorEl: e.currentTarget });
+                  }}
                   sx={{ minHeight: 48 }}
                 >
                   <ListItemIcon sx={{ minWidth: 52 }}>
@@ -308,6 +367,32 @@ export default function FileBrowser({
           </List>
         )}
       </Box>
+
+      <Menu
+        open={!!contextMenu}
+        anchorEl={contextMenu?.anchorEl}
+        onClose={() => setContextMenu(null)}
+        anchorOrigin={{ vertical: "center", horizontal: "center" }}
+        transformOrigin={{ vertical: "top", horizontal: "center" }}
+      >
+        <MenuItem onClick={handleDownloadFromMenu} disabled={downloading}>
+          <DownloadIcon fontSize="small" sx={{ mr: 1.5 }} />
+          {downloading ? "Downloading..." : "Download"}
+        </MenuItem>
+      </Menu>
+
+      {downloading && (
+        <Box sx={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 1400 }}>
+          <CircularProgress size={28} />
+        </Box>
+      )}
+
+      <Snackbar
+        open={!!snackbar}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(null)}
+        message={snackbar}
+      />
     </Box>
   );
 }

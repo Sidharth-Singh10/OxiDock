@@ -1,12 +1,18 @@
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   AppBar,
   Box,
+  CircularProgress,
   IconButton,
   Paper,
+  Snackbar,
   Toolbar,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import DownloadIcon from "@mui/icons-material/Download";
 import ImageIcon from "@mui/icons-material/Image";
 import CodeIcon from "@mui/icons-material/Code";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
@@ -37,8 +43,29 @@ function getFileIcon(filename: string) {
 export default function FilePreview({
   data,
   filename,
+  sessionId,
+  filePath,
   onBack,
 }: Props) {
+  const [downloading, setDownloading] = useState(false);
+  const [snackbar, setSnackbar] = useState<string | null>(null);
+
+  const handleDownload = async () => {
+    try {
+      setDownloading(true);
+      const savedPath = await invoke<string>("sftp_save_file", {
+        sessionId,
+        remotePath: filePath,
+        fileName: filename,
+      });
+      setSnackbar(`Saved to ${savedPath}`);
+    } catch (e) {
+      setSnackbar(`Download failed: ${e}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const isImage =
     !data.is_text &&
     /\.(png|jpg|jpeg|gif|bmp|webp|svg)$/i.test(filename);
@@ -86,6 +113,17 @@ export default function FilePreview({
               {data.truncated && " · truncated"}
             </Typography>
           </Box>
+          <Tooltip title="Download file">
+            <span>
+              <IconButton
+                onClick={handleDownload}
+                disabled={downloading}
+                sx={{ color: "text.primary" }}
+              >
+                {downloading ? <CircularProgress size={20} /> : <DownloadIcon />}
+              </IconButton>
+            </span>
+          </Tooltip>
         </Toolbar>
       </AppBar>
 
@@ -155,6 +193,13 @@ export default function FilePreview({
           </Box>
         )}
       </Box>
+
+      <Snackbar
+        open={!!snackbar}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(null)}
+        message={snackbar}
+      />
     </Box>
   );
 }
