@@ -38,6 +38,7 @@ pub fn run() {
             commands::list_keys,
             commands::delete_key,
             commands::get_key,
+            commands::list_supported_key_types,
             commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_list_sessions,

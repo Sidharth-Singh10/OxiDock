@@ -1,7 +1,10 @@
 /// TypeScript types matching Rust structs for Tauri invoke() calls.
 
+export type KeyType = "Pem" | "Rsa" | "Ecdsa" | "Ed25519";
+
 export interface KeyInfo {
   name: string;
+  key_type: KeyType;
   fingerprint: string;
   created_at: string;
 }

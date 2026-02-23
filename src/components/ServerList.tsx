@@ -87,6 +87,13 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
     invoke<KeyInfo[]>("list_keys").then(setKeys).catch(console.error);
   }, []);
 
+  // Re-fetch keys every time the Add Server dialog opens
+  useEffect(() => {
+    if (modalOpen) {
+      invoke<KeyInfo[]>("list_keys").then(setKeys).catch(console.error);
+    }
+  }, [modalOpen]);
+
   const handleAddServer = () => {
     if (!newName || !newHost || !newUser || !newKey) return;
     const server: ServerConfig = {

@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("IO error: {0}")]
     Io(String),
 
+    #[error("Unsupported key type: {0}")]
+    UnsupportedKeyType(String),
+
     #[error("{0}")]
     Other(String),
 }

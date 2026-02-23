@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::errors::AppResult;
-use crate::key_store::{KeyInfo, KeyStore};
+use crate::key_store::{KeyInfo, KeyStore, KeyType, SUPPORTED_KEY_TYPES};
 use crate::sftp_ops::{self, FileEntry, FilePreview};
 use crate::ssh_manager::SshSessionManager;
 
@@ -25,6 +25,11 @@ pub async fn list_keys(key_store: State<'_, Arc<KeyStore>>) -> AppResult<Vec<Key
 #[tauri::command]
 pub async fn delete_key(key_store: State<'_, Arc<KeyStore>>, name: String) -> AppResult<()> {
     key_store.delete_key(&name).await
+}
+
+#[tauri::command]
+pub async fn list_supported_key_types() -> AppResult<Vec<KeyType>> {
+    Ok(SUPPORTED_KEY_TYPES.to_vec())
 }
 
 #[tauri::command]

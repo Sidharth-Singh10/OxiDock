@@ -7,10 +7,98 @@ use tokio::sync::Mutex;
 
 use crate::errors::{AppError, AppResult};
 
+// ─── Supported Key Types ───────────────────────────────────────────────
+
+/// The predefined set of SSH key types we support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum KeyType {
+    /// Generic PKCS#8 PEM private key
+    Pem,
+    /// RSA private key
+    Rsa,
+    /// ECDSA private key (any curve)
+    Ecdsa,
+    /// Ed25519 private key
+    Ed25519,
+}
+
+impl std::fmt::Display for KeyType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KeyType::Pem => write!(f, "PEM"),
+            KeyType::Rsa => write!(f, "RSA"),
+            KeyType::Ecdsa => write!(f, "ECDSA"),
+            KeyType::Ed25519 => write!(f, "Ed25519"),
+        }
+    }
+}
+
+/// All key types the application accepts.
+pub const SUPPORTED_KEY_TYPES: &[KeyType] =
+    &[KeyType::Pem, KeyType::Rsa, KeyType::Ecdsa, KeyType::Ed25519];
+
+/// Detect the key type from PEM content.
+///
+/// Inspects PEM headers and, for OpenSSH keys, the algorithm identifier
+/// encoded inside the base64 payload.
+pub fn detect_key_type(pem: &str) -> AppResult<KeyType> {
+    let trimmed = pem.trim();
+
+    // Legacy PEM-format headers
+    if trimmed.starts_with("-----BEGIN RSA PRIVATE KEY-----") {
+        return Ok(KeyType::Rsa);
+    }
+    if trimmed.starts_with("-----BEGIN EC PRIVATE KEY-----") {
+        return Ok(KeyType::Ecdsa);
+    }
+    if trimmed.starts_with("-----BEGIN PRIVATE KEY-----") {
+        // Generic PKCS#8 — could be RSA/EC/Ed25519 but we classify as Pem
+        return Ok(KeyType::Pem);
+    }
+
+    // OpenSSH format — need to peek at the key algorithm inside the blob
+    if trimmed.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----") {
+        // Decode the base64 body and look for the algorithm string
+        let body: String = trimmed
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(body.as_bytes()) {
+            let payload = String::from_utf8_lossy(&decoded);
+            if payload.contains("ssh-rsa") {
+                return Ok(KeyType::Rsa);
+            }
+            if payload.contains("ssh-ed25519") {
+                return Ok(KeyType::Ed25519);
+            }
+            if payload.contains("ecdsa-sha2") {
+                return Ok(KeyType::Ecdsa);
+            }
+        }
+
+        // Couldn't determine specific type — still a valid OpenSSH key,
+        // fall through to generic PEM classification
+        return Ok(KeyType::Pem);
+    }
+
+    Err(AppError::UnsupportedKeyType(
+        "Key format not recognized. Supported types: PEM (PKCS#8), RSA, ECDSA, Ed25519".into(),
+    ))
+}
+
+// ─── Data Structures ───────────────────────────────────────────────────
+
+/// Default key type for backward-compatible deserialization of existing keys.
+fn default_key_type() -> KeyType {
+    KeyType::Pem
+}
+
 /// Metadata about a stored SSH key (safe to send to JS).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyInfo {
     pub name: String,
+    pub key_type: KeyType,
     pub fingerprint: String,
     pub created_at: String,
 }
@@ -19,10 +107,14 @@ pub struct KeyInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct KeyRecord {
     name: String,
+    #[serde(default = "default_key_type")]
+    key_type: KeyType,
     fingerprint: String,
     created_at: String,
     key_pem_b64: String,
 }
+
+// ─── Key Store ─────────────────────────────────────────────────────────
 
 /// Manages SSH keys stored as an encrypted JSON file.
 /// Uses Stronghold-style storage via a simple JSON vault on disk.
@@ -74,8 +166,12 @@ impl KeyStore {
             .map_err(|e| AppError::KeyStore(format!("Failed to write vault: {e}")))
     }
 
-    /// Store a new SSH key.
+    /// Store a new SSH key. The key type is auto-detected from PEM content.
+    /// Returns an error if the key format is not one of the supported types.
     pub async fn store_key(&self, name: String, key_pem: String) -> AppResult<KeyInfo> {
+        // Validate and classify key type before anything else
+        let key_type = detect_key_type(&key_pem)?;
+
         let _guard = self.lock.lock().await;
         let fingerprint = Self::compute_fingerprint(&key_pem);
         let created_at = Utc::now().to_rfc3339();
@@ -83,6 +179,7 @@ impl KeyStore {
 
         let record = KeyRecord {
             name: name.clone(),
+            key_type,
             fingerprint: fingerprint.clone(),
             created_at: created_at.clone(),
             key_pem_b64,
@@ -94,6 +191,7 @@ impl KeyStore {
 
         Ok(KeyInfo {
             name,
+            key_type,
             fingerprint,
             created_at,
         })
@@ -107,6 +205,7 @@ impl KeyStore {
             .values()
             .map(|r| KeyInfo {
                 name: r.name.clone(),
+                key_type: r.key_type,
                 fingerprint: r.fingerprint.clone(),
                 created_at: r.created_at.clone(),
             })

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Alert,
   Box,
+  Chip,
   CircularProgress,
   Dialog,
   Fab,
@@ -18,6 +19,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import type { KeyType } from "../lib/types";
 import type { TransitionProps } from "@mui/material/transitions";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import AddIcon from "@mui/icons-material/Add";
@@ -45,6 +47,21 @@ const GrowTransition = forwardRef(function GrowTransition(
     />
   );
 });
+
+/* ── Key type badge colors ──────────────────────────────────────── */
+const KEY_TYPE_COLORS: Record<KeyType, "primary" | "secondary" | "success" | "default" | "info" | "warning"> = {
+  Rsa: "primary",
+  Ed25519: "secondary",
+  Ecdsa: "info",
+  Pem: "default",
+};
+
+const KEY_TYPE_LABELS: Record<KeyType, string> = {
+  Rsa: "RSA",
+  Ed25519: "Ed25519",
+  Ecdsa: "ECDSA",
+  Pem: "PEM",
+};
 
 export default function KeyManager() {
   const [keys, setKeys] = useState<KeyInfo[]>([]);
@@ -213,7 +230,17 @@ export default function KeyManager() {
                   </Box>
                 </ListItemIcon>
                 <ListItemText
-                  primary={key.name}
+                  primary={
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      {key.name}
+                      <Chip
+                        label={KEY_TYPE_LABELS[key.key_type] ?? key.key_type}
+                        color={KEY_TYPE_COLORS[key.key_type] ?? "default"}
+                        size="small"
+                        sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }}
+                      />
+                    </Box>
+                  }
                   secondary={
                     <>
                       <Typography
@@ -348,7 +375,7 @@ export default function KeyManager() {
           />
           <TextField
             id="key-pem-input"
-            label="Private Key (PEM)"
+            label="Private Key"
             placeholder="Paste your SSH private key here..."
             required
             fullWidth
@@ -514,6 +541,19 @@ export default function KeyManager() {
               <Typography variant="body1" fontWeight={600}>
                 {viewingKey.name}
               </Typography>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                Type
+              </Typography>
+              <Box sx={{ mt: 0.5 }}>
+                <Chip
+                  label={KEY_TYPE_LABELS[viewingKey.key_type] ?? viewingKey.key_type}
+                  color={KEY_TYPE_COLORS[viewingKey.key_type] ?? "default"}
+                  size="small"
+                  sx={{ fontWeight: 700 }}
+                />
+              </Box>
             </Box>
             <Box>
               <Typography variant="caption" color="text.secondary">
