@@ -5,7 +5,7 @@
 - [x] SSH private keys are stored base64-encoded in a JSON vault file in the app data directory
 - [x] Raw PEM key material is NEVER sent to the JS frontend — `retrieve_key_pem()` is Rust-internal only
 - [x] JS only receives safe metadata: key name, fingerprint, creation date
-- [ ] **TODO**: Encrypt the vault file at rest using the Stronghold plugin or OS keychain on Android
+- [x] Encrypt the vault file at rest using the Stronghold plugin or OS keychain on Android
 
 ## SSH Sessions
 
@@ -28,7 +28,7 @@
 
 ## Biometric Gating (Android)
 
-- [ ] **TODO**: Integrate `tauri-plugin-biometric` for biometric check before key retrieval
+- [x] Integrate `tauri-plugin-biometric` for biometric check before key retrieval
 - [ ] **TODO**: Implement passphrase fallback when biometrics not available
 
 ## Transport
@@ -43,6 +43,6 @@
 | Key theft from device storage      | Vault file in app-private directory | ✅ Basic |
 | MITM attack (server impersonation) | Host key verification               | ❌ TODO  |
 | Key extraction from memory         | Zeroize after use                   | ❌ TODO  |
-| Unauthorized key access            | Biometric/passphrase gating         | ❌ TODO  |
+| Unauthorized key access            | Biometric/passphrase gating         | ✅ Done  |
 | Key exposure to JS context         | Rust-only key retrieval             | ✅ Done  |
 | Log leakage                        | Safe logging (no secrets)           | ✅ Done  |
