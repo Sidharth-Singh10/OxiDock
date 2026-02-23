@@ -1,0 +1,143 @@
+AI agent prompt — detailed and actionable
+
+Use this as the instruction for an AI developer agent (or give to a contractor). It is written as a single, self-contained task description; it contains architecture, requirements, milestones, acceptance criteria, and code examples the agent should produce.
+
+OBJECTIVE (agent role):
+You are a full-stack developer agent. Build a cross-platform Tauri mobile app (priority: Android) called “VPS File Browser” that lets a user browse a remote VPS over SSH/SFTP using SSH private-key authentication pasted by the user. The app must securely store keys in the device-native keystore when available, support automatic re-login, and use Joy UI. Deliver code, documentation, and an installable Android build.
+
+Non-functional constraints & environment
+
+Use Rust for the native layer (Tauri commands).
+
+UI: React + Joy UI.
+
+Target Android API level ≥ 28 (Android 9). Tauri mobile + Rust toolchain must be compatible (Rust ≥ 1.77.2; Tauri ≥ 2.0.0).
+
+Prefer hardware-backed keystore for secrets: use tauri-plugin-keystore to access Android Keystore / iOS Keychain. Also include optional support for tauri-plugin-stronghold as a cross-platform vault fallback.
+
+Keep all real SSH key material and SFTP operations inside Rust — do not expose raw keys to JS unnecessarily. JS may request actions and the Rust layer executes them.
+
+Do not require a remote server backend. (The app is a client talking directly to the VPS via SSH/SFTP.)
+
+Deliverables (what the agent must produce)
+
+Working prototype code for Android (Tauri mobile) with:
+
+React + Joy UI frontend.
+
+Rust/Tauri native commands to handle SSH authentication and SFTP operations.
+
+Secure key storage integrated with tauri-plugin-keystore and fallback to Stronghold if keystore not available.
+
+Example flows: paste key → save → auto-login → list directory /home → open file preview → download file.
+
+Clear README with setup and build instructions (how to run locally, Android build commands, emulator vs device).
+
+
+A security checklist and threat model notes.
+
+A demo apk file or instructions to produce one.
+
+
+Acceptance criteria (automated/manual checks)
+
+The app accepts a pasted SSH private key and can authenticate to an SSH server using that key (supports passphrase-protected keys).
+
+The private key is stored encrypted in device keystore (via tauri-plugin-keystore) or inside Stronghold vault; it is not persisted in plaintext anywhere.
+
+Biometric gating: if tauri-plugin-keystore is used, the app must check biometric availability via tauri-plugin-biometric before storing/retrieving. If biometrics not available, present a secure fallback (user passphrase to encrypt key in Stronghold).
+
+On app open, the user can choose a saved host and the app will (after biometric/passphrase unlock) reuse the private key to authenticate and list the home directory.
+
+The JS UI never directly writes the private key to disk: key input flows from JS → Rust command for storage; retrieval for SSH should be done inside Rust (JS requests the command to connect or request listing).
+
+The app lists directories with good UX (tree or datagrid), supports file preview (text, images), and download to device storage. File list operations scale (streaming large directories).
+
+Basic tests exist and pass: unit tests for Rust SFTP helpers; at least one end-to-end test that simulates store→retrieve→list_dir (can be mocked).
+
+Documentation: step-by-step build instructions, security notes, how to add additional hosts/keys.
+
+High-level architecture (to implement)
+React + Joy UI (frontend)
+  └─ communicates with Rust via Tauri invoke() calls
+
+Tauri (Rust) layer
+  ├─ keystore plugin integration (tauri-plugin-keystore)
+  ├─ optional stronghold vault (tauri-plugin-stronghold)
+  ├─ SSH client (ssh2 or russh) + SFTP helper module
+  └─ connection pool / session manager to reuse SSH sessions
+
+Flow examples:
+- Save key:
+  JS -> invoke("store_key", {name, key_pem, passphrase(optional)})
+  Rust -> store via keystore plugin OR encrypt & store in stronghold
+- Authenticate & list directory:
+  JS -> invoke("connect_and_list", {host, user, path})
+  Rust -> retrieve key from keystore/vault, set up SSH session, SFTP list -> return file list
+Detailed implementation tasks (milestones & tasks)
+
+Milestone A — repo + skeleton
+
+Create repo, initialize Tauri app with React template.
+
+Add Joy UI and basic layout (sidebar + main panel).
+
+Add src-tauri/Cargo.toml dependencies for tauri-plugin-keystore = "2" and chosen SSH crate.
+
+Add JS guest bindings: @impierce/tauri-plugin-keystore, @tauri-apps/plugin-biometric in frontend.
+
+Milestone B — secure key storage
+
+Implement Rust wrapper command store_key(name: String, key_pem: String, passphrase: Option<String>). Behavior:
+
+Check biometric status via plugin API (or call plugin via guest bindings from JS and pass result). If biometrics available: call keystore plugin to store() a vault JSON (structure holds multiple named keys). If not available: store encrypted vault in Stronghold or ask user for a passphrase to encrypt and store in stronghold/file.
+
+Ensure the stored blob is a JSON object { name: string, created_at: timestamp, meta: {...}, key: base64(encrypted PEM) } — but the plugin stores the entire blob; keep JS ignorant of raw PEM.
+
+Implement retrieve_key(name) command that returns key to Rust-only context to use for authentication — do not return raw key to JS. If the agent must pass something to JS (e.g., key fingerprint, metadata), only return safe computed values.
+
+Milestone C — SSH & SFTP core
+
+Implement a session manager in Rust:
+
+connect(host, user, key_name, passphrase_option) returns session handle or error.
+
+Support list_dir(session_handle, path) and download_file(session_handle, path, out_stream) and read_file_preview(session_handle, path, max_bytes).
+
+Use ssh2 (synchronous) or russh (async). If choosing async, ensure Tauri command handlers use async properly.
+
+Implement connection pooling & reuse: map host+user to active SSH session; implement TTL and keep-alive.
+
+Milestone D — frontend features
+
+Implement server management UI: add host, name, username, host, port, choose key from stored keys or add new key.
+
+File browser UI: TreeView + DataGrid for files; previews (text up to X KB, images).
+
+Terminal view (optional): run simple commands and show output (via invoke → Rust executes channel.exec()).
+
+Authentication flow: on first use, ask to confirm biometric setup; if absent, fall back to passphrase.
+
+Milestone E — UX & security
+
+Add biometric check before retrieving keys. Use tauri-plugin-biometric checkStatus() to decide.
+
+Ensure all keys are zeroized in memory after use (use Rust crates supporting zeroize).
+
+Implement safe logs — do not log private keys or passphrases.
+
+Milestone F — tests & CI
+
+Rust unit tests for SFTP helpers (using mocks).
+
+JS tests for UI logic (jest/RTL).
+
+CI workflow to run tests and build the app.
+
+Milestone G — documentation & demo
+
+README with: local dev, emulator/device run, build Android apk release, plugin notes.
+
+Security checklist.
+
+Demo apk or instructions to produce one.
