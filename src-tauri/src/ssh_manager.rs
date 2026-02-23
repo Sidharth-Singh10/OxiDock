@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use uuid::Uuid;
 
 use russh::client;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::keys::PrivateKey;
+use russh_sftp::client::SftpSession;
 
 use crate::errors::{AppError, AppResult};
 use crate::key_store::KeyStore;
@@ -27,11 +28,38 @@ impl client::Handler for ClientHandler {
     }
 }
 
-/// Holds an active SSH session handle.
+/// Holds an active SSH session handle with a pooled SFTP channel.
 pub struct SshSession {
-    pub(crate) handle: client::Handle<ClientHandler>,
+    handle: client::Handle<ClientHandler>,
     pub(crate) host: String,
     pub(crate) user: String,
+    sftp: OnceCell<SftpSession>,
+}
+
+impl SshSession {
+    /// Returns a reusable SFTP session, creating one on first call.
+    pub(crate) async fn sftp(&self) -> AppResult<&SftpSession> {
+        self.sftp
+            .get_or_try_init(|| async {
+                let channel = self
+                    .handle
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| AppError::Sftp(format!("Failed to open channel: {e}")))?;
+
+                channel
+                    .request_subsystem(true, "sftp")
+                    .await
+                    .map_err(|e| {
+                        AppError::Sftp(format!("Failed to request sftp subsystem: {e}"))
+                    })?;
+
+                SftpSession::new(channel.into_stream())
+                    .await
+                    .map_err(|e| AppError::Sftp(format!("Failed to init SFTP session: {e}")))
+            })
+            .await
+    }
 }
 
 /// Manages active SSH sessions with pooling.
@@ -111,6 +139,7 @@ impl SshSessionManager {
             handle,
             host: host.to_string(),
             user: user.to_string(),
+            sftp: OnceCell::new(),
         });
 
         let mut sessions = self.sessions.lock().await;

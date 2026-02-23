@@ -1,9 +1,6 @@
 use serde::Serialize;
 use std::sync::Arc;
 
-use russh::Channel;
-use russh_sftp::client::SftpSession;
-
 use crate::errors::{AppError, AppResult};
 use crate::ssh_manager::SshSession;
 
@@ -17,29 +14,9 @@ pub struct FileEntry {
     pub modified: Option<String>,
 }
 
-/// Open an SFTP subsystem channel on an existing SSH session.
-pub async fn open_sftp(session: &Arc<SshSession>) -> AppResult<SftpSession> {
-    let channel: Channel<russh::client::Msg> = session
-        .handle
-        .channel_open_session()
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to open channel: {e}")))?;
-
-    channel
-        .request_subsystem(true, "sftp")
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to request sftp subsystem: {e}")))?;
-
-    let sftp = SftpSession::new(channel.into_stream())
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to init SFTP session: {e}")))?;
-
-    Ok(sftp)
-}
-
 /// List directory contents via SFTP.
 pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<FileEntry>> {
-    let sftp = open_sftp(session).await?;
+    let sftp = session.sftp().await?;
 
     let entries = sftp
         .read_dir(path)
@@ -92,7 +69,7 @@ pub async fn read_file_preview(
     path: &str,
     max_bytes: usize,
 ) -> AppResult<FilePreview> {
-    let sftp = open_sftp(session).await?;
+    let sftp = session.sftp().await?;
 
     let data = sftp
         .read(path)
@@ -128,7 +105,7 @@ pub async fn read_file_preview(
 
 /// Download a file via SFTP and return the bytes.
 pub async fn download_file(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<u8>> {
-    let sftp = open_sftp(session).await?;
+    let sftp = session.sftp().await?;
 
     let data = sftp
         .read(path)
