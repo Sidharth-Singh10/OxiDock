@@ -6,7 +6,7 @@ import {
   Box,
   Collapse,
   Divider,
-  Drawer,
+  SwipeableDrawer,
   IconButton,
   List,
   ListItem,
@@ -39,7 +39,7 @@ function App() {
     serverName: string;
   } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [bottomTab, setBottomTab] = useState(0); // 0 = Browse, 1 = Keys
+  const [bottomTab, setBottomTab] = useState(0);
   const [themeExpanded, setThemeExpanded] = useState(false);
   const [catExpanded, setCatExpanded] = useState(false);
 
@@ -109,9 +109,13 @@ function App() {
       </AppBar>
 
       {/* Sidebar Drawer */}
-      <Drawer
+      <SwipeableDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        onOpen={() => setDrawerOpen(true)}
+        swipeAreaWidth={60}
+        minFlingVelocity={250}
+        hysteresis={0.3}
         sx={{
           "& .MuiDrawer-paper": {
             width: DRAWER_WIDTH,
@@ -285,7 +289,7 @@ function App() {
             })}
           </List>
         </Collapse>
-      </Drawer>
+      </SwipeableDrawer>
 
       {/* Main content */}
       <Box
