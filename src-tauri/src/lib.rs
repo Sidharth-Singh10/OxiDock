@@ -12,6 +12,12 @@ use ssh_manager::SshSessionManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("oxidock=debug"))
+        .format_timestamp_millis()
+        .init();
+
+    log::info!("OxiDock starting — performance logging enabled");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {

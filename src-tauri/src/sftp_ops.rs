@@ -16,12 +16,18 @@ pub struct FileEntry {
 
 /// List directory contents via SFTP.
 pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<FileEntry>> {
-    let sftp = session.sftp().await?;
+    let total_start = std::time::Instant::now();
 
+    let sftp_acquire_start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+    let sftp_acquire_ms = sftp_acquire_start.elapsed().as_secs_f64() * 1000.0;
+
+    let readdir_start = std::time::Instant::now();
     let entries = sftp
         .read_dir(path)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to read directory: {e}")))?;
+    let readdir_ms = readdir_start.elapsed().as_secs_f64() * 1000.0;
 
     let mut files: Vec<FileEntry> = Vec::new();
     for entry in entries {
@@ -60,6 +66,16 @@ pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<Fi
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
+    let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
+    log::info!(
+        "[PERF] list_dir \"{}\" — total: {:.2}ms | sftp_acquire: {:.2}ms | read_dir: {:.2}ms | entries: {}",
+        path,
+        total_ms,
+        sftp_acquire_ms,
+        readdir_ms,
+        files.len(),
+    );
+
     Ok(files)
 }
 
@@ -69,12 +85,20 @@ pub async fn read_file_preview(
     path: &str,
     max_bytes: usize,
 ) -> AppResult<FilePreview> {
+    let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
     let data = sftp
         .read(path)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to read file: {e}")))?;
+
+    log::info!(
+        "[PERF] read_file_preview \"{}\" — {:.2}ms | size: {} bytes",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        data.len(),
+    );
 
     let truncated = data.len() > max_bytes;
     let preview_data = if truncated { &data[..max_bytes] } else { &data };
@@ -105,12 +129,20 @@ pub async fn read_file_preview(
 
 /// Download a file via SFTP and return the bytes.
 pub async fn download_file(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<u8>> {
+    let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
     let data = sftp
         .read(path)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to download file: {e}")))?;
+
+    log::info!(
+        "[PERF] download_file \"{}\" — {:.2}ms | size: {} bytes",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        data.len(),
+    );
 
     Ok(data)
 }

@@ -39,8 +39,25 @@ pub struct SshSession {
 impl SshSession {
     /// Returns a reusable SFTP session, creating one on first call.
     pub(crate) async fn sftp(&self) -> AppResult<&SftpSession> {
-        self.sftp
+        let already_initialized = self.sftp.initialized();
+        if already_initialized {
+            log::debug!(
+                "[SFTP] Reusing existing SFTP channel (host={}, user={})",
+                self.host,
+                self.user,
+            );
+        }
+
+        let result = self
+            .sftp
             .get_or_try_init(|| async {
+                log::info!(
+                    "[SFTP] Creating NEW SFTP channel (host={}, user={})",
+                    self.host,
+                    self.user,
+                );
+                let start = std::time::Instant::now();
+
                 let channel = self
                     .handle
                     .channel_open_session()
@@ -54,11 +71,19 @@ impl SshSession {
                         AppError::Sftp(format!("Failed to request sftp subsystem: {e}"))
                     })?;
 
-                SftpSession::new(channel.into_stream())
+                let session = SftpSession::new(channel.into_stream())
                     .await
-                    .map_err(|e| AppError::Sftp(format!("Failed to init SFTP session: {e}")))
+                    .map_err(|e| AppError::Sftp(format!("Failed to init SFTP session: {e}")))?;
+
+                log::info!(
+                    "[SFTP] New channel created in {:.2}ms",
+                    start.elapsed().as_secs_f64() * 1000.0,
+                );
+                Ok(session)
             })
-            .await
+            .await;
+
+        result
     }
 }
 

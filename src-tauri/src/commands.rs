@@ -48,9 +48,24 @@ pub async fn ssh_connect(
     key_name: String,
     passphrase: Option<String>,
 ) -> AppResult<String> {
-    session_mgr
+    log::info!("[SSH] Connecting to {}@{}:{}", user, host, port);
+    let start = std::time::Instant::now();
+    let result = session_mgr
         .connect(&host, port, &user, &key_name, passphrase.as_deref())
-        .await
+        .await;
+    match &result {
+        Ok(session_id) => log::info!(
+            "[SSH] Connected in {:.2}ms — session_id={}",
+            start.elapsed().as_secs_f64() * 1000.0,
+            session_id,
+        ),
+        Err(e) => log::error!(
+            "[SSH] Connection failed after {:.2}ms — {}",
+            start.elapsed().as_secs_f64() * 1000.0,
+            e,
+        ),
+    }
+    result
 }
 
 #[tauri::command]
@@ -58,6 +73,7 @@ pub async fn ssh_disconnect(
     session_mgr: State<'_, Arc<SshSessionManager>>,
     session_id: String,
 ) -> AppResult<()> {
+    log::info!("[SSH] Disconnecting session_id={}", session_id);
     session_mgr.disconnect(&session_id).await
 }
 
@@ -80,8 +96,21 @@ pub async fn sftp_list_dir(
     session_id: String,
     path: String,
 ) -> AppResult<Vec<FileEntry>> {
+    log::debug!("[CMD] sftp_list_dir called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
+
     let session = session_mgr.get_session(&session_id).await?;
-    sftp_ops::list_dir(&session, &path).await
+    let session_lookup_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let result = sftp_ops::list_dir(&session, &path).await;
+
+    log::info!(
+        "[CMD] sftp_list_dir \"{}\" — total_cmd: {:.2}ms | session_lookup: {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        session_lookup_ms,
+    );
+    result
 }
 
 #[tauri::command]
@@ -91,8 +120,16 @@ pub async fn sftp_read_file_preview(
     path: String,
     max_bytes: Option<usize>,
 ) -> AppResult<FilePreview> {
+    log::debug!("[CMD] sftp_read_file_preview called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
     let session = session_mgr.get_session(&session_id).await?;
-    sftp_ops::read_file_preview(&session, &path, max_bytes.unwrap_or(64 * 1024)).await
+    let result = sftp_ops::read_file_preview(&session, &path, max_bytes.unwrap_or(64 * 1024)).await;
+    log::info!(
+        "[CMD] sftp_read_file_preview \"{}\" — total_cmd: {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    result
 }
 
 #[tauri::command]
@@ -101,8 +138,16 @@ pub async fn sftp_download_file(
     session_id: String,
     path: String,
 ) -> AppResult<Vec<u8>> {
+    log::debug!("[CMD] sftp_download_file called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
     let session = session_mgr.get_session(&session_id).await?;
-    sftp_ops::download_file(&session, &path).await
+    let result = sftp_ops::download_file(&session, &path).await;
+    log::info!(
+        "[CMD] sftp_download_file \"{}\" — total_cmd: {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    result
 }
 
 // ─── Helper types ─────────────────────────────────────────────────────
