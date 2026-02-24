@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useImperativeHandle } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Box,
@@ -35,11 +35,17 @@ import FileUploadIcon from "@mui/icons-material/FileUpload";
 import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
 import FilePreview from "./FilePreview";
 
+export interface FileBrowserBackHandle {
+  canGoBack: () => boolean;
+  handleBack: () => void;
+}
+
 interface Props {
   sessionId: string;
   serverName: string;
   onDisconnect: () => void;
   initialPath?: string;
+  onBackRef?: React.RefObject<FileBrowserBackHandle | null>;
 }
 
 function formatSize(bytes: number): string {
@@ -54,11 +60,12 @@ function formatSize(bytes: number): string {
   return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export default function FileBrowser({
+function FileBrowserInner({
   sessionId,
   serverName: _serverName,
   onDisconnect: _onDisconnect,
   initialPath,
+  onBackRef,
 }: Props) {
   const [path, setPath] = useState(initialPath || "/home");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -230,6 +237,25 @@ export default function FileBrowser({
 
   // Build breadcrumb segments
   const pathParts = path.split("/").filter(Boolean);
+
+  // Expose back navigation to parent for Android back gesture
+  // At mount point (initialPath) or fs root: back = disconnect. Else: close preview or navigate up.
+  const rootPath = (initialPath || "/home").replace(/\/$/, "") || "/";
+  const atMountPoint = path.replace(/\/$/, "") === rootPath || path === "/";
+  useImperativeHandle(
+    onBackRef,
+    () => ({
+      canGoBack: () => !!preview || (!atMountPoint && pathParts.length > 1),
+      handleBack: () => {
+        if (preview) setPreview(null);
+        else if (!atMountPoint && pathParts.length > 1) {
+          const parent = path.split("/").slice(0, -1).join("/") || "/";
+          loadDir(parent);
+        }
+      },
+    }),
+    [preview, path, pathParts.length, loadDir, atMountPoint, rootPath],
+  );
 
   if (preview) {
     return (
@@ -716,3 +742,5 @@ export default function FileBrowser({
     </Box>
   );
 }
+
+export default FileBrowserInner;

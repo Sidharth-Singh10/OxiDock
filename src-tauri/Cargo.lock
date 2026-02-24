@@ -3310,7 +3310,9 @@ dependencies = [
  "tauri-plugin-biometric",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tauri-plugin-mobile-onbackpressed-listener",
  "tauri-plugin-opener",
+ "tauri-plugin-process",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
@@ -5223,6 +5225,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-mobile-onbackpressed-listener"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a648f8ac075b5b4cca79d9b85de056fd9c412dabeba653a0b1a9bea8f0543551"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tauri-plugin-opener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5242,6 +5256,16 @@ dependencies = [
  "url",
  "windows 0.61.3",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-process"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

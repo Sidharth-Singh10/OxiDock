@@ -14,6 +14,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Snackbar,
   Toolbar,
   Typography,
 } from "@mui/material";
@@ -30,9 +31,11 @@ import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import StorageIcon from "@mui/icons-material/Storage";
 import KeyManager from "./components/KeyManager";
 import ServerList from "./components/ServerList";
-import FileBrowser from "./components/FileBrowser";
+import FileBrowser, { type FileBrowserBackHandle } from "./components/FileBrowser";
 import { useAppTheme } from "./theme/ThemeContext";
 import { getDefaultServer } from "./lib/storage";
+import { registerBackEvent } from "@kingsword/tauri-plugin-mobile-onbackpressed-listener";
+import { exit } from "@tauri-apps/plugin-process";
 
 const DRAWER_WIDTH = 280;
 
@@ -48,9 +51,67 @@ function App() {
   const [catExpanded, setCatExpanded] = useState(false);
   const [autoConnecting, setAutoConnecting] = useState(false);
   const [autoConnectError, setAutoConnectError] = useState<string | null>(null);
+  const [exitSnackbar, setExitSnackbar] = useState(false);
   const autoConnectDone = useRef(false);
+  const fileBrowserBackRef = useRef<FileBrowserBackHandle | null>(null);
+  const rootBackCountRef = useRef(0);
+
+  // Refs for back handler to read current state synchronously
+  const drawerOpenRef = useRef(drawerOpen);
+  const themeExpandedRef = useRef(themeExpanded);
+  const catExpandedRef = useRef(catExpanded);
+  const activeSessionRef = useRef(activeSession);
+  drawerOpenRef.current = drawerOpen;
+  themeExpandedRef.current = themeExpanded;
+  catExpandedRef.current = catExpanded;
+  activeSessionRef.current = activeSession;
 
   const { themeName, setThemeName, availableThemes } = useAppTheme();
+
+  // Android back gesture: navigate in-app, or exit on double-back at root
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const setup = async () => {
+      try {
+        unlisten = await registerBackEvent(() => {
+          // 1. Drawer open → close drawer
+          if (drawerOpenRef.current) {
+            setDrawerOpen(false);
+            return;
+          }
+          // 2. Theme/cat expanded in drawer → collapse
+          if (themeExpandedRef.current || catExpandedRef.current) {
+            setThemeExpanded(false);
+            setCatExpanded(false);
+            return;
+          }
+          // 3. Connected + FileBrowser can go back (preview or deeper path)
+          if (activeSessionRef.current) {
+            const fb = fileBrowserBackRef.current;
+            if (fb?.canGoBack()) {
+              fb.handleBack();
+              return;
+            }
+            // 4. Connected + at FileBrowser root → disconnect
+            setActiveSession(null);
+            rootBackCountRef.current = 0;
+            return;
+          }
+          // 5. At app root (ServerList/KeyManager) → double-back to exit
+          if (rootBackCountRef.current === 0) {
+            rootBackCountRef.current = 1;
+            setExitSnackbar(true);
+            return;
+          }
+          exit(0);
+        });
+      } catch {
+        // Plugin not available on desktop
+      }
+    };
+    setup();
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     if (autoConnectDone.current) return;
@@ -120,7 +181,10 @@ function App() {
         <Toolbar sx={{ minHeight: 56 }}>
           <IconButton
             edge="start"
-            onClick={() => setDrawerOpen(true)}
+            onClick={() => {
+              setDrawerOpen(true);
+              rootBackCountRef.current = 0;
+            }}
             sx={{ mr: 1.5, color: "text.primary" }}
           >
             <MenuIcon />
@@ -403,6 +467,7 @@ function App() {
             serverName={activeSession.serverName}
             onDisconnect={handleDisconnect}
             initialPath={activeSession.mountPoint}
+            onBackRef={fileBrowserBackRef}
           />
         ) : (
           <>
@@ -512,6 +577,16 @@ function App() {
           })}
         </Box>
       )}
+
+      <Snackbar
+        open={exitSnackbar}
+        autoHideDuration={2000}
+        onClose={() => {
+          setExitSnackbar(false);
+          rootBackCountRef.current = 0;
+        }}
+        message="Press back again to exit"
+      />
     </Box>
   );
 }

@@ -3,6 +3,7 @@
   "specifiers": {
     "npm:@emotion/react@^11.14.0": "11.14.0_react@18.3.1",
     "npm:@emotion/styled@^11.14.1": "11.14.1_@emotion+react@11.14.0__react@18.3.1_react@18.3.1",
+    "npm:@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener@2": "2.0.1",
     "npm:@mui/icons-material@^6.5.0": "6.5.0_@mui+material@6.5.0__@emotion+react@11.14.0___react@18.3.1__@emotion+styled@11.14.1___@emotion+react@11.14.0____react@18.3.1___react@18.3.1__@types+react@18.3.28__react@18.3.1__react-dom@18.3.1___react@18.3.1_@types+react@18.3.28_react@18.3.1_@emotion+react@11.14.0__react@18.3.1_@emotion+styled@11.14.1__@emotion+react@11.14.0___react@18.3.1__react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@mui/material@^6.4.6": "6.5.0_@emotion+react@11.14.0__react@18.3.1_@emotion+styled@11.14.1__@emotion+react@11.14.0___react@18.3.1__react@18.3.1_@types+react@18.3.28_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@tauri-apps/api@2": "2.10.1",
@@ -11,6 +12,7 @@
     "npm:@tauri-apps/plugin-dialog@2": "2.6.0",
     "npm:@tauri-apps/plugin-fs@^2.4.5": "2.4.5",
     "npm:@tauri-apps/plugin-opener@2": "2.5.3",
+    "npm:@tauri-apps/plugin-process@2": "2.3.1",
     "npm:@tauri-apps/plugin-stronghold@^2.3.1": "2.3.1",
     "npm:@types/react-dom@^18.3.1": "18.3.7_@types+react@18.3.28",
     "npm:@types/react@^18.3.1": "18.3.28",
@@ -412,6 +414,13 @@
         "@jridgewell/sourcemap-codec"
       ]
     },
+    "@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener@2.0.1": {
+      "integrity": "sha512-ar5kx47BAaRrQf5HRtG2b1BTQk6WXhwuZOzGHQw6y1EEgDJnGuWw8D6xNMXIl6iHfoMo9qS3qPLbhA0fDlH8/g==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ],
+      "tarball": "https://npm.jsr.io/~/11/@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener/2.0.1.tgz"
+    },
     "@mui/core-downloads-tracker@6.5.0": {
       "integrity": "sha512-LGb8t8i6M2ZtS3Drn3GbTI1DVhDY6FJ9crEey2lZ0aN2EMZo8IZBZj9wRf4vqbZHaWjsYgtbOnJw5V8UWbmK2Q=="
     },
@@ -758,6 +767,12 @@
     },
     "@tauri-apps/plugin-opener@2.5.3": {
       "integrity": "sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
+    "@tauri-apps/plugin-process@2.3.1": {
+      "integrity": "sha512-nCa4fGVaDL/B9ai03VyPOjfAHRHSBz5v6F/ObsB73r/dA3MHHhZtldaDMIc0V/pnUw9ehzr2iEG+XkSEyC0JJA==",
       "dependencies": [
         "@tauri-apps/api"
       ]
@@ -1262,6 +1277,7 @@
       "dependencies": [
         "npm:@emotion/react@^11.14.0",
         "npm:@emotion/styled@^11.14.1",
+        "npm:@jsr/kingsword__tauri-plugin-mobile-onbackpressed-listener@2",
         "npm:@mui/icons-material@^6.5.0",
         "npm:@mui/material@^6.4.6",
         "npm:@tauri-apps/api@2",
@@ -1270,6 +1286,7 @@
         "npm:@tauri-apps/plugin-dialog@2",
         "npm:@tauri-apps/plugin-fs@^2.4.5",
         "npm:@tauri-apps/plugin-opener@2",
+        "npm:@tauri-apps/plugin-process@2",
         "npm:@tauri-apps/plugin-stronghold@^2.3.1",
         "npm:@types/react-dom@^18.3.1",
         "npm:@types/react@^18.3.1",

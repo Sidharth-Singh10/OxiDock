@@ -1,14 +1,1 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "biometric:default",
-    "dialog:default",
-    "fs:allow-read-file",
-    "fs:read-files"
-  ]
-}
+{"$schema":"../gen/schemas/desktop-schema.json","identifier":"default","description":"Capability for the main window","windows":["main"],"permissions":["core:default","opener:default","biometric:default","dialog:default","fs:allow-read-file","fs:read-files","process:default","mobile-onbackpressed-listener:allow-register-back-event","mobile-onbackpressed-listener:allow-registerListener"]}
