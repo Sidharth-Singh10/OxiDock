@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   AppBar,
   Box,
   ButtonBase,
+  CircularProgress,
   Collapse,
   Divider,
   SwipeableDrawer,
@@ -25,10 +27,12 @@ import PaletteIcon from "@mui/icons-material/Palette";
 import CheckIcon from "@mui/icons-material/Check";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import StorageIcon from "@mui/icons-material/Storage";
 import KeyManager from "./components/KeyManager";
 import ServerList from "./components/ServerList";
 import FileBrowser from "./components/FileBrowser";
 import { useAppTheme } from "./theme/ThemeContext";
+import { getDefaultServer } from "./lib/storage";
 
 const DRAWER_WIDTH = 280;
 
@@ -36,16 +40,51 @@ function App() {
   const [activeSession, setActiveSession] = useState<{
     sessionId: string;
     serverName: string;
+    mountPoint?: string;
   } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [bottomTab, setBottomTab] = useState(0);
   const [themeExpanded, setThemeExpanded] = useState(false);
   const [catExpanded, setCatExpanded] = useState(false);
+  const [autoConnecting, setAutoConnecting] = useState(false);
+  const [autoConnectError, setAutoConnectError] = useState<string | null>(null);
+  const autoConnectDone = useRef(false);
 
   const { themeName, setThemeName, availableThemes } = useAppTheme();
 
-  const handleConnect = (sessionId: string, serverName: string) => {
-    setActiveSession({ sessionId, serverName });
+  useEffect(() => {
+    if (autoConnectDone.current) return;
+    autoConnectDone.current = true;
+
+    const server = getDefaultServer();
+    if (!server) return;
+
+    setAutoConnecting(true);
+    invoke<string>("ssh_connect", {
+      host: server.host,
+      port: server.port,
+      user: server.username,
+      keyName: server.keyName,
+      passphrase: null,
+    })
+      .then((sessionId) => {
+        setActiveSession({
+          sessionId,
+          serverName: server.name,
+          mountPoint: server.defaultMountPoint,
+        });
+      })
+      .catch((e) => {
+        setAutoConnectError(String(e));
+      })
+      .finally(() => {
+        setAutoConnecting(false);
+      });
+  }, []);
+
+  const handleConnect = (sessionId: string, serverName: string, mountPoint?: string) => {
+    setActiveSession({ sessionId, serverName, mountPoint });
+    setAutoConnectError(null);
     setDrawerOpen(false);
   };
 
@@ -308,28 +347,100 @@ function App() {
           overflow: "auto",
           display: "flex",
           flexDirection: "column",
-          pb: !activeSession ? "80px" : 0,
+          pb: !activeSession && !autoConnecting ? "80px" : 0,
         }}
       >
-        {activeSession ? (
+        {autoConnecting ? (
+          <Box
+            sx={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 3,
+              p: 4,
+            }}
+          >
+            <Box
+              sx={{
+                width: 88,
+                height: 88,
+                borderRadius: "24px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: (theme) => `${theme.palette.primary.main}1a`,
+                position: "relative",
+              }}
+            >
+              <StorageIcon sx={{ fontSize: 40, color: "primary.main" }} />
+              <CircularProgress
+                size={96}
+                thickness={2}
+                sx={{
+                  position: "absolute",
+                  color: "primary.main",
+                  opacity: 0.6,
+                }}
+              />
+            </Box>
+            <Box sx={{ textAlign: "center" }}>
+              <Typography variant="h6" fontWeight={600} gutterBottom>
+                Connecting...
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {getDefaultServer()?.name ?? "Default server"}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" fontFamily="monospace" sx={{ mt: 0.5, display: "block" }}>
+                {getDefaultServer()?.username}@{getDefaultServer()?.host}
+              </Typography>
+            </Box>
+          </Box>
+        ) : activeSession ? (
           <FileBrowser
             sessionId={activeSession.sessionId}
             serverName={activeSession.serverName}
             onDisconnect={handleDisconnect}
+            initialPath={activeSession.mountPoint}
           />
-        ) : bottomTab === 0 ? (
-          <Box sx={{ p: 2, flex: 1 }}>
-            <ServerList onConnect={handleConnect} variant="page" />
-          </Box>
         ) : (
-          <Box sx={{ p: 2, flex: 1 }}>
-            <KeyManager />
-          </Box>
+          <>
+            {autoConnectError && (
+              <Box sx={{ px: 2, pt: 2 }}>
+                <Box
+                  sx={{
+                    p: 1.5,
+                    borderRadius: 2,
+                    bgcolor: (theme) => `${theme.palette.error.main}1a`,
+                    border: 1,
+                    borderColor: "error.main",
+                  }}
+                >
+                  <Typography variant="body2" color="error.main" fontWeight={500}>
+                    Auto-connect failed
+                  </Typography>
+                  <Typography variant="caption" color="error.main" sx={{ opacity: 0.8 }}>
+                    {autoConnectError}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+            {bottomTab === 0 ? (
+              <Box sx={{ p: 2, flex: 1 }}>
+                <ServerList onConnect={handleConnect} variant="page" />
+              </Box>
+            ) : (
+              <Box sx={{ p: 2, flex: 1 }}>
+                <KeyManager />
+              </Box>
+            )}
+          </>
         )}
       </Box>
 
       {/* Glass Blur Dock — only when not connected */}
-      {!activeSession && (
+      {!activeSession && !autoConnecting && (
         <Box
           sx={{
             position: "fixed",

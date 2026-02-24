@@ -39,6 +39,7 @@ interface Props {
   sessionId: string;
   serverName: string;
   onDisconnect: () => void;
+  initialPath?: string;
 }
 
 function formatSize(bytes: number): string {
@@ -57,8 +58,9 @@ export default function FileBrowser({
   sessionId,
   serverName: _serverName,
   onDisconnect: _onDisconnect,
+  initialPath,
 }: Props) {
-  const [path, setPath] = useState("/home");
+  const [path, setPath] = useState(initialPath || "/home");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

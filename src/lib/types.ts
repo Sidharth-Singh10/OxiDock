@@ -37,4 +37,6 @@ export interface ServerConfig {
   port: number;
   username: string;
   keyName: string;
+  defaultMountPoint?: string;
+  isDefault?: boolean;
 }

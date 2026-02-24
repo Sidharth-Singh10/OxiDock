@@ -10,6 +10,7 @@ import {
   DialogContent,
   Divider,
   Fab,
+  FormControlLabel,
   IconButton,
   List,
   ListItem,
@@ -19,6 +20,7 @@ import {
   ListSubheader,
   MenuItem,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -62,7 +64,7 @@ function IconWrap({ children, color = "primary.main", bgAlpha = "1a" }: {
 }
 
 interface Props {
-  onConnect: (sessionId: string, serverName: string) => void;
+  onConnect: (sessionId: string, serverName: string, mountPoint?: string) => void;
   variant?: "drawer" | "page";
   onClose?: () => void;
 }
@@ -80,6 +82,8 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
   const [newPort, setNewPort] = useState("22");
   const [newUser, setNewUser] = useState("");
   const [newKey, setNewKey] = useState("");
+  const [newMountPoint, setNewMountPoint] = useState("/home/");
+  const [newIsDefault, setNewIsDefault] = useState(false);
 
   useEffect(() => {
     setServers(loadServers());
@@ -102,6 +106,8 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
       port: parseInt(newPort) || 22,
       username: newUser,
       keyName: newKey,
+      defaultMountPoint: newMountPoint || undefined,
+      isDefault: newIsDefault,
     };
     setServers(addServer(server));
     setModalOpen(false);
@@ -110,6 +116,8 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
     setNewPort("22");
     setNewUser("");
     setNewKey("");
+    setNewMountPoint("/home/");
+    setNewIsDefault(false);
   };
 
   const handleRemoveServer = (id: string) => {
@@ -127,7 +135,7 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
         keyName: server.keyName,
         passphrase: null,
       });
-      onConnect(sessionId, server.name);
+      onConnect(sessionId, server.name, server.defaultMountPoint);
     } catch (e) {
       setError(`Failed to connect to ${server.name}: ${e}`);
     } finally {
@@ -391,7 +399,11 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                 required
                 fullWidth
                 value={newUser}
-                onChange={(e) => setNewUser(e.target.value)}
+                onChange={(e) => {
+                  const user = e.target.value;
+                  setNewUser(user);
+                  setNewMountPoint(user ? `/home/${user}` : "/home/");
+                }}
               />
               <TextField
                 id="server-port-input"
@@ -422,6 +434,28 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                 No keys available. Add an SSH key first in the Keys tab.
               </Typography>
             )}
+            <TextField
+              id="server-mount-point-input"
+              label="Default Mount Point"
+              placeholder="/home/username"
+              fullWidth
+              value={newMountPoint}
+              onChange={(e) => setNewMountPoint(e.target.value)}
+              helperText="Starting directory when connected"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={newIsDefault}
+                  onChange={(e) => setNewIsDefault(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Connect on app start"
+              slotProps={{
+                typography: { variant: "body2" },
+              }}
+            />
             <Button
               id="save-server-btn"
               variant="contained"

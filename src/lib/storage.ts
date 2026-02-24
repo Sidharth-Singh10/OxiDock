@@ -18,9 +18,23 @@ export function saveServers(servers: ServerConfig[]): void {
 
 export function addServer(server: ServerConfig): ServerConfig[] {
   const servers = loadServers();
+  if (server.isDefault) {
+    servers.forEach((s) => (s.isDefault = false));
+  }
   servers.push(server);
   saveServers(servers);
   return servers;
+}
+
+export function setDefaultServer(id: string | null): ServerConfig[] {
+  const servers = loadServers();
+  servers.forEach((s) => (s.isDefault = s.id === id));
+  saveServers(servers);
+  return servers;
+}
+
+export function getDefaultServer(): ServerConfig | undefined {
+  return loadServers().find((s) => s.isDefault);
 }
 
 export function removeServer(id: string): ServerConfig[] {
