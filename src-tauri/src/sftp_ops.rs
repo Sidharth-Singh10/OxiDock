@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::sync::Arc;
 
+use tokio::io::AsyncWriteExt;
+
 use crate::errors::{AppError, AppResult};
 use crate::ssh_manager::SshSession;
 
@@ -148,7 +150,11 @@ pub async fn download_file(session: &Arc<SshSession>, path: &str) -> AppResult<V
 }
 
 /// Download a remote file via SFTP and save it to a local path.
-pub async fn save_file(session: &Arc<SshSession>, remote_path: &str, local_path: &str) -> AppResult<u64> {
+pub async fn save_file(
+    session: &Arc<SshSession>,
+    remote_path: &str,
+    local_path: &str,
+) -> AppResult<u64> {
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
@@ -172,6 +178,52 @@ pub async fn save_file(session: &Arc<SshSession>, remote_path: &str, local_path:
     );
 
     Ok(size)
+}
+
+/// Create a directory on the remote server via SFTP.
+pub async fn create_dir(session: &Arc<SshSession>, path: &str) -> AppResult<()> {
+    let start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+
+    sftp.create_dir(path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to create directory: {e}")))?;
+
+    log::info!(
+        "[PERF] create_dir \"{}\" — {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+
+    Ok(())
+}
+
+/// Upload file data to a remote path via SFTP.
+pub async fn upload_file(
+    session: &Arc<SshSession>,
+    remote_path: &str,
+    data: &[u8],
+) -> AppResult<()> {
+    let start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+
+    let mut file = sftp
+        .create(remote_path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to create file for upload: {e}")))?;
+
+    file.write_all(data)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to write file data: {e}")))?;
+
+    log::info!(
+        "[PERF] upload_file \"{}\" — {:.2}ms | size: {} bytes",
+        remote_path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        data.len(),
+    );
+
+    Ok(())
 }
 
 /// Preview result returned to the frontend.

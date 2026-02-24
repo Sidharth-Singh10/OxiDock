@@ -17,11 +17,21 @@ import {
   Snackbar,
   Stack,
   Typography,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Backdrop,
 } from "@mui/material";
 import FolderIcon from "@mui/icons-material/Folder";
 import DownloadIcon from "@mui/icons-material/Download";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import AddIcon from "@mui/icons-material/Add";
+import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
+import FileUploadIcon from "@mui/icons-material/FileUpload";
+
 import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
 import FilePreview from "./FilePreview";
 
@@ -62,8 +72,79 @@ export default function FileBrowser({
     entry: FileEntry;
     anchorEl: HTMLElement;
   } | null>(null);
+
+  // FAB States
+  const [fabOpen, setFabOpen] = useState(false);
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFabToggle = () => setFabOpen(!fabOpen);
+
+  const handleCreateFolderStart = () => {
+    setFabOpen(false);
+    setNewFolderName("");
+    setCreateFolderDialogOpen(true);
+  };
+
+  const handleCreateFolderSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFolderName.trim()) return;
+
+    setIsCreatingFolder(true);
+    try {
+      const newDirPath = path === "/" ? `/${newFolderName}` : `${path}/${newFolderName}`;
+      await invoke("sftp_create_dir", {
+        sessionId,
+        path: newDirPath,
+      });
+      setSnackbar("Folder created successfully");
+      setCreateFolderDialogOpen(false);
+      loadDir(path); // Auto-refresh
+    } catch (err) {
+      setError(`Failed to create folder: ${err}`);
+      setCreateFolderDialogOpen(false); // Close on error too
+    } finally {
+      setIsCreatingFolder(false);
+    }
+  };
+
+  const handleUploadFile = () => {
+    setFabOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const buffer = await file.arrayBuffer();
+      const remotePath = path === "/" ? `/${file.name}` : `${path}/${file.name}`;
+
+      await invoke("sftp_upload_file", {
+        sessionId,
+        remotePath,
+        data: Array.from(new Uint8Array(buffer)),
+      });
+
+      setSnackbar("File uploaded successfully");
+      loadDir(path); // Auto-refresh
+    } catch (err) {
+      setError(`Upload failed: ${err}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""; // Reset input
+      }
+    }
+  };
 
   const loadDir = useCallback(
     async (dirPath: string) => {
@@ -212,14 +293,6 @@ export default function FileBrowser({
           })}
         </Breadcrumbs>
       </Box>
-
-      {error && (
-        <Card sx={{ m: 1.5, bgcolor: "error.main", color: "error.contrastText" }}>
-          <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
-            <Typography variant="body2">{error}</Typography>
-          </CardContent>
-        </Card>
-      )}
 
       {/* File list */}
       <Box sx={{ flex: 1, overflow: "auto" }}>
@@ -381,9 +454,248 @@ export default function FileBrowser({
         </MenuItem>
       </Menu>
 
-      {downloading && (
-        <Box sx={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 1400 }}>
-          <CircularProgress size={28} />
+      {/* Loading Backdrop */}
+      <Backdrop
+        open={isUploading || downloading}
+        sx={{
+          zIndex: 2000,
+          flexDirection: 'column',
+          gap: 2,
+          bgcolor: 'rgba(0, 0, 0, 0.7)'
+        }}
+      >
+        <CircularProgress color="primary" />
+        <Typography variant="h6" color="white" fontWeight="500">
+          {isUploading ? "Uploading file..." : "Downloading..."}
+        </Typography>
+      </Backdrop>
+
+      {/* Error Dialog */}
+      <Dialog
+        open={!!error}
+        onClose={() => setError(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ color: "error.main", fontWeight: 600 }}>Action Failed</DialogTitle>
+        <DialogContent>
+          <Typography
+            variant="body2"
+            sx={{
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              maxHeight: "50vh",
+              overflowY: "auto",
+              fontFamily: "monospace",
+              p: 1.5,
+              bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+              borderRadius: 1
+            }}
+          >
+            {error}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 0 }}>
+          <Button onClick={() => setError(null)} variant="contained" color="primary" disableElevation sx={{ borderRadius: 2 }}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* FAB Backdrop */}
+      {fabOpen && (
+        <Box
+          onClick={() => setFabOpen(false)}
+          sx={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            bgcolor: "rgba(0,0,0,0.5)",
+            zIndex: 1300,
+            transition: "opacity 0.2s ease-in-out",
+          }}
+        />
+      )}
+
+      {/* FAB Options Area */}
+      <Box
+        sx={{
+          position: "fixed",
+          bottom: 88, // Pushed closer to the bottom (was 104)
+          right: 24,
+          zIndex: 1400,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 2,
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 2,
+            opacity: fabOpen ? 1 : 0,
+            pointerEvents: fabOpen ? "auto" : "none",
+            transform: fabOpen ? "translateY(0)" : "translateY(24px)",
+            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+          }}
+        >
+          <Card
+            elevation={4}
+            sx={{
+              borderRadius: 8,
+              bgcolor: "background.paper",
+              overflow: "hidden",
+            }}
+          >
+            <ListItemButton onClick={handleCreateFolderStart} sx={{ py: 1.5, px: 2.5 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
+                <CreateNewFolderIcon color="action" />
+              </ListItemIcon>
+              <ListItemText primary="Folder" primaryTypographyProps={{ fontWeight: 500 }} />
+            </ListItemButton>
+          </Card>
+
+          <Card
+            elevation={4}
+            sx={{
+              borderRadius: 8,
+              bgcolor: "background.paper",
+              overflow: "hidden",
+            }}
+          >
+            <ListItemButton onClick={handleUploadFile} sx={{ py: 1.5, px: 2.5 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
+                <FileUploadIcon color="action" />
+              </ListItemIcon>
+              <ListItemText primary="Upload" primaryTypographyProps={{ fontWeight: 500 }} />
+            </ListItemButton>
+          </Card>
+        </Box>
+
+        <Box
+          component="button"
+          onClick={handleFabToggle}
+          sx={{
+            width: 64, // Increased size (was 56)
+            height: 64, // Increased size (was 56)
+            borderRadius: "20px", // Adjusted for slightly more squircle look
+            bgcolor: "primary.main",
+            color: "primary.contrastText",
+            border: "none",
+            outline: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            cursor: "pointer",
+            transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)",
+            transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+            "&:active": {
+              transform: fabOpen ? "rotate(45deg) scale(0.95)" : "rotate(0deg) scale(0.95)",
+            },
+            "&:hover": {
+              bgcolor: "primary.dark",
+            },
+          }}
+        >
+          <AddIcon sx={{ fontSize: 36 }} /> {/* Increased icon size */}
+        </Box>
+      </Box>
+
+      {/* Create Folder Dialog */}
+      {createFolderDialogOpen && (
+        <Box
+          sx={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            bgcolor: "rgba(0,0,0,0.5)",
+            zIndex: 1500,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            p: 2,
+          }}
+        >
+          <Card elevation={8} sx={{ width: "100%", maxWidth: 360, borderRadius: 3 }}>
+            <Box component="form" onSubmit={handleCreateFolderSubmit}>
+              <CardContent sx={{ pt: 3, pb: 2 }}>
+                <Typography variant="h6" gutterBottom>
+                  New Folder
+                </Typography>
+                <input
+                  type="text"
+                  placeholder="Folder name"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  autoFocus
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    marginTop: "8px",
+                    borderRadius: "8px",
+                    border: "1px solid #ccc",
+                    outline: "none",
+                    fontFamily: "inherit",
+                    fontSize: "1rem",
+                    backgroundColor: "var(--mui-palette-background-default)",
+                    color: "var(--mui-palette-text-primary)",
+                  }}
+                />
+              </CardContent>
+              <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pb: 2, gap: 1 }}>
+                <Box
+                  component="button"
+                  type="button"
+                  onClick={() => setCreateFolderDialogOpen(false)}
+                  disabled={isCreatingFolder}
+                  sx={{
+                    px: 2,
+                    py: 1,
+                    border: "none",
+                    bgcolor: "transparent",
+                    color: "primary.main",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    borderRadius: 1,
+                    "&:hover": { bgcolor: "action.hover" },
+                  }}
+                >
+                  Cancel
+                </Box>
+                <Box
+                  component="button"
+                  type="submit"
+                  disabled={!newFolderName.trim() || isCreatingFolder}
+                  sx={{
+                    px: 2,
+                    py: 1,
+                    border: "none",
+                    bgcolor: "primary.main",
+                    color: "primary.contrastText",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    borderRadius: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1,
+                    opacity: (!newFolderName.trim() || isCreatingFolder) ? 0.5 : 1,
+                  }}
+                >
+                  {isCreatingFolder && <CircularProgress size={16} color="inherit" />}
+                  Create
+                </Box>
+              </Box>
+            </Box>
+          </Card>
         </Box>
       )}
 
@@ -392,6 +704,12 @@ export default function FileBrowser({
         autoHideDuration={4000}
         onClose={() => setSnackbar(null)}
         message={snackbar}
+      />
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: "none" }}
+        onChange={handleFileSelect}
       />
     </Box>
   );

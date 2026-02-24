@@ -19,6 +19,7 @@ pub fn run() {
     log::info!("OxiDock starting — performance logging enabled");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -53,6 +54,8 @@ pub fn run() {
             commands::sftp_read_file_preview,
             commands::sftp_download_file,
             commands::sftp_save_file,
+            commands::sftp_create_dir,
+            commands::sftp_upload_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

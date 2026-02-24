@@ -9,6 +9,7 @@
     "npm:@tauri-apps/cli@2": "2.10.0",
     "npm:@tauri-apps/plugin-biometric@^2.3.2": "2.3.2",
     "npm:@tauri-apps/plugin-dialog@2": "2.6.0",
+    "npm:@tauri-apps/plugin-fs@^2.4.5": "2.4.5",
     "npm:@tauri-apps/plugin-opener@2": "2.5.3",
     "npm:@tauri-apps/plugin-stronghold@^2.3.1": "2.3.1",
     "npm:@types/react-dom@^18.3.1": "18.3.7_@types+react@18.3.28",
@@ -749,6 +750,12 @@
         "@tauri-apps/api"
       ]
     },
+    "@tauri-apps/plugin-fs@2.4.5": {
+      "integrity": "sha512-dVxWWGE6VrOxC7/jlhyE+ON/Cc2REJlM35R3PJX3UvFw2XwYhLGQVAIyrehenDdKjotipjYEVc4YjOl3qq90fA==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
     "@tauri-apps/plugin-opener@2.5.3": {
       "integrity": "sha512-CCcUltXMOfUEArbf3db3kCE7Ggy1ExBEBl51Ko2ODJ6GDYHRp1nSNlQm5uNCFY5k7/ufaK5Ib3Du/Zir19IYQQ==",
       "dependencies": [
@@ -1261,6 +1268,7 @@
         "npm:@tauri-apps/cli@2",
         "npm:@tauri-apps/plugin-biometric@^2.3.2",
         "npm:@tauri-apps/plugin-dialog@2",
+        "npm:@tauri-apps/plugin-fs@^2.4.5",
         "npm:@tauri-apps/plugin-opener@2",
         "npm:@tauri-apps/plugin-stronghold@^2.3.1",
         "npm:@types/react-dom@^18.3.1",

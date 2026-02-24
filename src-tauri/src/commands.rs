@@ -162,7 +162,11 @@ pub async fn sftp_save_file(
 
     let save_dir = if cfg!(target_os = "android") {
         let public = std::path::PathBuf::from("/storage/emulated/0/Download");
-        if public.exists() && std::fs::metadata(&public).map(|m| !m.permissions().readonly()).unwrap_or(false) {
+        if public.exists()
+            && std::fs::metadata(&public)
+                .map(|m| !m.permissions().readonly())
+                .unwrap_or(false)
+        {
             public
         } else {
             app.path()
@@ -226,6 +230,43 @@ pub async fn sftp_save_file(
     );
 
     Ok(local_str)
+}
+
+#[tauri::command]
+pub async fn sftp_create_dir(
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    path: String,
+) -> AppResult<()> {
+    log::debug!("[CMD] sftp_create_dir called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
+    let session = session_mgr.get_session(&session_id).await?;
+    let result = sftp_ops::create_dir(&session, &path).await;
+    log::info!(
+        "[CMD] sftp_create_dir \"{}\" — total_cmd: {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    result
+}
+
+#[tauri::command]
+pub async fn sftp_upload_file(
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    remote_path: String,
+    data: Vec<u8>,
+) -> AppResult<()> {
+    log::debug!("[CMD] sftp_upload_file called — path=\"{}\"", remote_path);
+    let start = std::time::Instant::now();
+    let session = session_mgr.get_session(&session_id).await?;
+    let result = sftp_ops::upload_file(&session, &remote_path, &data).await;
+    log::info!(
+        "[CMD] sftp_upload_file \"{}\" — total_cmd: {:.2}ms",
+        remote_path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    result
 }
 
 // ─── Helper types ─────────────────────────────────────────────────────
