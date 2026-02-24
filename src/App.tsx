@@ -1,9 +1,8 @@
 import { useState } from "react";
 import {
   AppBar,
-  BottomNavigation,
-  BottomNavigationAction,
   Box,
+  ButtonBase,
   Collapse,
   Divider,
   SwipeableDrawer,
@@ -309,6 +308,7 @@ function App() {
           overflow: "auto",
           display: "flex",
           flexDirection: "column",
+          pb: !activeSession ? "80px" : 0,
         }}
       >
         {activeSession ? (
@@ -328,22 +328,78 @@ function App() {
         )}
       </Box>
 
-      {/* Bottom Navigation — only when not connected */}
+      {/* Glass Blur Dock — only when not connected */}
       {!activeSession && (
-        <BottomNavigation
-          value={bottomTab}
-          onChange={(_, val) => setBottomTab(val)}
-          showLabels
+        <Box
           sx={{
-            bgcolor: "background.paper",
-            borderTop: 1,
-            borderColor: "divider",
-            "& .Mui-selected": { color: "primary.main" },
+            position: "fixed",
+            bottom: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1200,
+            display: "flex",
+            justifyContent: "center",
+            gap: 1,
+            px: 3,
+            py: 1,
+            borderRadius: "9999px",
+            backdropFilter: "blur(24px)",
+            WebkitBackdropFilter: "blur(24px)",
+            bgcolor: "rgba(30, 30, 46, 0.55)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.35)",
+            mb: "env(safe-area-inset-bottom, 0px)",
           }}
         >
-          <BottomNavigationAction label="Browse" icon={<DnsIcon />} />
-          <BottomNavigationAction label="Keys" icon={<VpnKeyIcon />} />
-        </BottomNavigation>
+          {[
+            { label: "Browse", icon: <DnsIcon />, index: 0 },
+            { label: "Keys", icon: <VpnKeyIcon />, index: 1 },
+          ].map((tab) => {
+            const isActive = bottomTab === tab.index;
+            return (
+              <ButtonBase
+                key={tab.index}
+                onClick={() => setBottomTab(tab.index)}
+                sx={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 0.3,
+                  py: 0.8,
+                  px: 2,
+                  borderRadius: "14px",
+                  bgcolor: isActive
+                    ? "rgba(255, 255, 255, 0.1)"
+                    : "transparent",
+                  color: isActive ? "primary.main" : "text.secondary",
+                  transition: "all 0.25s ease",
+                  "&:hover": {
+                    bgcolor: "rgba(255, 255, 255, 0.06)",
+                  },
+                  "& .MuiSvgIcon-root": {
+                    fontSize: 22,
+                    transition: "transform 0.25s ease",
+                    transform: isActive ? "scale(1.1)" : "scale(1)",
+                  },
+                }}
+              >
+                {tab.icon}
+                <Typography
+                  variant="caption"
+                  sx={{
+                    fontSize: "0.65rem",
+                    fontWeight: isActive ? 700 : 500,
+                    letterSpacing: 0.3,
+                    lineHeight: 1,
+                  }}
+                >
+                  {tab.label}
+                </Typography>
+              </ButtonBase>
+            );
+          })}
+        </Box>
       )}
     </Box>
   );
