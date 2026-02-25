@@ -15,6 +15,13 @@ export interface FileEntry {
   is_dir: boolean;
   size: number;
   modified: string | null;
+  is_image: boolean;
+}
+
+export interface ImageCacheEntry {
+  localPath: string;   // absolute local path to cached file
+  remotePath: string;  // original remote path (cache key)
+  cachedAt: number;    // Date.now() timestamp
 }
 
 export interface FilePreview {

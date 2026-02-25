@@ -319,6 +319,75 @@ pub async fn sftp_upload_file(
     result
 }
 
+#[tauri::command]
+pub async fn sftp_get_thumbnail(
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    path: String,
+    max_bytes: Option<usize>,
+) -> AppResult<String> {
+    log::debug!("[CMD] sftp_get_thumbnail called — path=\"{}\"", path);
+    let session = session_mgr.get_session(&session_id).await?;
+    sftp_ops::get_thumbnail(&session, &path, max_bytes.unwrap_or(128 * 1024)).await
+}
+
+#[tauri::command]
+pub async fn sftp_cache_image(
+    app: tauri::AppHandle,
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    path: String,
+    remote_mtime: Option<u64>,
+) -> AppResult<String> {
+    log::debug!("[CMD] sftp_cache_image called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
+
+    // Ensure the image cache directory exists.
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Sftp(format!("Cannot determine cache dir: {e}")))?;
+    let image_cache_dir = cache_dir.join("image_cache");
+    std::fs::create_dir_all(&image_cache_dir)
+        .map_err(|e| AppError::Sftp(format!("Cannot create image cache dir: {e}")))?;
+
+    let session = session_mgr.get_session(&session_id).await?;
+    let local_path = sftp_ops::cache_image(&session, &path, &image_cache_dir, remote_mtime).await?;
+
+    log::info!(
+        "[CMD] sftp_cache_image \"{}\" → \"{}\" — total_cmd: {:.2}ms",
+        path,
+        local_path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    Ok(local_path)
+}
+
+#[tauri::command]
+pub async fn open_file_externally(path: String) -> AppResult<()> {
+    log::info!("[CMD] open_file_externally — path=\"{}\"", path);
+    tauri_plugin_opener::open_path(path, None::<&str>)
+        .map_err(|e| AppError::Sftp(format!("Failed to open file externally: {e}")))
+}
+
+#[tauri::command]
+pub async fn sftp_delete_file(
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    session_id: String,
+    path: String,
+) -> AppResult<()> {
+    log::debug!("[CMD] sftp_delete_file called — path=\"{}\"", path);
+    let start = std::time::Instant::now();
+    let session = session_mgr.get_session(&session_id).await?;
+    let result = sftp_ops::delete_file(&session, &path).await;
+    log::info!(
+        "[CMD] sftp_delete_file \"{}\" — total_cmd: {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    result
+}
+
 // ─── Helper types ─────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]

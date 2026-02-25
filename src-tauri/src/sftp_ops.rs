@@ -14,6 +14,16 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: u64,
     pub modified: Option<String>,
+    pub is_image: bool,
+}
+
+/// Returns true if the file extension is a supported image format.
+pub fn is_image_ext(name: &str) -> bool {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "avif" | "heic" | "svg"
+    )
 }
 
 /// List directory contents via SFTP.
@@ -52,12 +62,14 @@ pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<Fi
                 .unwrap_or_default()
         });
 
+        let is_image = if is_dir { false } else { is_image_ext(&name) };
         files.push(FileEntry {
             name,
             path: full_path,
             is_dir,
             size,
             modified,
+            is_image,
         });
     }
 
@@ -127,6 +139,125 @@ pub async fn read_file_preview(
             total_size: data.len() as u64,
         })
     }
+}
+
+/// Fetch a small slice of an image for thumbnail display.
+/// Uses SFTP open() + AsyncReadExt::read() to transfer ONLY `max_bytes`
+/// across the network — avoids downloading the entire file.
+/// Returns a base64-encoded string of the bytes read.
+///
+/// ⚠️  PERFORMANCE NOTE (see PERFORMANCE.md): `max_bytes` is intentionally
+/// kept at 32 KB. Partial-JPEG data may not decode to a full image in all
+/// browsers/environments; if thumbnails appear broken, raise `max_bytes`
+/// incrementally. Full correctness is guaranteed when `max_bytes >= file size`.
+pub async fn get_thumbnail(
+    session: &Arc<SshSession>,
+    path: &str,
+    max_bytes: usize,
+) -> AppResult<String> {
+    use tokio::io::AsyncReadExt;
+
+    let start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+
+    // Open a read-only file handle — no image data transferred yet.
+    let mut file = sftp
+        .open(path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to open image for thumbnail: {e}")))?;
+
+    // Read ONLY up to max_bytes — this is the only network transfer.
+    let mut buf = vec![0u8; max_bytes];
+    let n = file
+        .read(&mut buf)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to read thumbnail bytes: {e}")))?;
+    buf.truncate(n);
+
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
+
+    log::info!(
+        "[PERF] get_thumbnail \"{}\" — {:.2}ms | bytes_read: {}/{} (partial SFTP read)",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        n,
+        max_bytes,
+    );
+    Ok(b64)
+}
+
+/// Download a full image to the local cache dir and return the cached path.
+/// Uses mtime-based freshness: skips download if the cached file's mtime matches the remote.
+pub async fn cache_image(
+    session: &Arc<SshSession>,
+    path: &str,
+    cache_dir: &std::path::Path,
+    remote_mtime: Option<u64>,
+) -> AppResult<String> {
+    let start = std::time::Instant::now();
+
+    // Build a stable cache filename: sha256 is heavy, so we use a URL-safe base64 of the path.
+    let ext = path.rsplit('.').next().unwrap_or("bin");
+    let safe_key = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        path.as_bytes(),
+    );
+    let cache_file = cache_dir.join(format!("{safe_key}.{ext}"));
+
+    // Check freshness: if cached file exists and mtime matches, skip download.
+    if cache_file.exists() {
+        if let Some(remote_mt) = remote_mtime {
+            if let Ok(meta) = std::fs::metadata(&cache_file) {
+                if let Ok(modified) = meta.modified() {
+                    let cached_ts = modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if cached_ts >= remote_mt {
+                        log::info!("[CACHE] cache hit for \"{}\" — skipping download", path);
+                        return Ok(cache_file.to_string_lossy().to_string());
+                    }
+                }
+            }
+        } else {
+            // No mtime info — trust the existing cached file.
+            log::info!("[CACHE] cache hit (no mtime) for \"{}\"", path);
+            return Ok(cache_file.to_string_lossy().to_string());
+        }
+    }
+
+    // Download full image.
+    let sftp = session.sftp().await?;
+    let data = sftp
+        .read(path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to download image: {e}")))?;
+    tokio::fs::write(&cache_file, &data)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to write cached image: {e}")))?;
+
+    log::info!(
+        "[PERF] cache_image \"{}\" — {:.2}ms | size: {} bytes",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+        data.len(),
+    );
+    Ok(cache_file.to_string_lossy().to_string())
+}
+
+/// Delete a remote file via SFTP.
+pub async fn delete_file(session: &Arc<SshSession>, path: &str) -> AppResult<()> {
+    let start = std::time::Instant::now();
+    let sftp = session.sftp().await?;
+    sftp.remove_file(path)
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to delete file: {e}")))?;
+    log::info!(
+        "[PERF] delete_file \"{}\" — {:.2}ms",
+        path,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    Ok(())
 }
 
 /// Download a file via SFTP and return the bytes.

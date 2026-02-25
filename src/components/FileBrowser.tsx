@@ -6,6 +6,11 @@ import {
   Card,
   CardContent,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Button,
   Link,
   List,
   ListItem,
@@ -17,11 +22,6 @@ import {
   Snackbar,
   Stack,
   Typography,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
   Backdrop,
 } from "@mui/material";
 import FolderIcon from "@mui/icons-material/Folder";
@@ -31,9 +31,14 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import AddIcon from "@mui/icons-material/Add";
 import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import DeleteIcon from "@mui/icons-material/Delete";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 
 import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
 import FilePreview from "./FilePreview";
+import ImageThumbnail from "./ImageThumbnail";
+import ImageViewer from "./ImageViewer";
 
 export interface FileBrowserBackHandle {
   canGoBack: () => boolean;
@@ -77,10 +82,22 @@ function FileBrowserInner({
   } | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+
+  // Image viewer state
+  const [imageViewer, setImageViewer] = useState<{
+    images: FileEntry[];
+    index: number;
+  } | null>(null);
+
+  // Context menu
   const [contextMenu, setContextMenu] = useState<{
     entry: FileEntry;
     anchorEl: HTMLElement;
   } | null>(null);
+
+  // Confirm delete dialog
+  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // FAB States
   const [fabOpen, setFabOpen] = useState(false);
@@ -114,10 +131,10 @@ function FileBrowserInner({
       });
       setSnackbar("Folder created successfully");
       setCreateFolderDialogOpen(false);
-      loadDir(path); // Auto-refresh
+      loadDir(path);
     } catch (err) {
       setError(`Failed to create folder: ${err}`);
-      setCreateFolderDialogOpen(false); // Close on error too
+      setCreateFolderDialogOpen(false);
     } finally {
       setIsCreatingFolder(false);
     }
@@ -144,13 +161,13 @@ function FileBrowserInner({
       });
 
       setSnackbar("File uploaded successfully");
-      loadDir(path); // Auto-refresh
+      loadDir(path);
     } catch (err) {
       setError(`Upload failed: ${err}`);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
-        fileInputRef.current.value = ""; // Reset input
+        fileInputRef.current.value = "";
       }
     }
   };
@@ -179,9 +196,15 @@ function FileBrowserInner({
     loadDir(path);
   }, []);
 
+  // ─── Entry click ─────────────────────────────────────────────────────────
   const handleEntryClick = async (entry: FileEntry) => {
     if (entry.is_dir) {
       await loadDir(entry.path);
+    } else if (entry.is_image) {
+      // Collect all image entries for swipe navigation
+      const imageEntries = entries.filter((e) => e.is_image);
+      const idx = imageEntries.findIndex((e) => e.path === entry.path);
+      setImageViewer({ images: imageEntries, index: idx >= 0 ? idx : 0 });
     } else {
       try {
         const data = await invoke<FilePreviewType>("sftp_read_file_preview", {
@@ -211,6 +234,37 @@ function FileBrowserInner({
     }, 500);
   };
 
+  // ─── Context menu handlers ────────────────────────────────────────────────
+
+  const handleOpenFromMenu = () => {
+    if (!contextMenu) return;
+    const entry = contextMenu.entry;
+    setContextMenu(null);
+    handleEntryClick(entry);
+  };
+
+  const handleOpenWithFromMenu = async () => {
+    if (!contextMenu) return;
+    const entry = contextMenu.entry;
+    setContextMenu(null);
+    try {
+      setDownloading(true);
+      const mtime = entry.modified
+        ? Math.floor(new Date(entry.modified).getTime() / 1000)
+        : undefined;
+      const localPath = await invoke<string>("sftp_cache_image", {
+        sessionId,
+        path: entry.path,
+        remoteMtime: mtime,
+      });
+      await invoke("open_file_externally", { path: localPath });
+    } catch (err) {
+      setSnackbar(`Failed to open externally: ${err}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const handleDownloadFromMenu = async () => {
     if (!contextMenu) return;
     const entry = contextMenu.entry;
@@ -230,6 +284,31 @@ function FileBrowserInner({
     }
   };
 
+  const handleDeleteFromMenu = () => {
+    if (!contextMenu) return;
+    setDeleteTarget(contextMenu.entry);
+    setContextMenu(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await invoke("sftp_delete_file", {
+        sessionId,
+        path: deleteTarget.path,
+      });
+      setSnackbar(`Deleted ${deleteTarget.name}`);
+      setDeleteTarget(null);
+      loadDir(path);
+    } catch (err) {
+      setError(`Delete failed: ${err}`);
+      setDeleteTarget(null);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleNavigateUp = () => {
     const parent = path.split("/").slice(0, -1).join("/") || "/";
     loadDir(parent);
@@ -238,24 +317,36 @@ function FileBrowserInner({
   // Build breadcrumb segments
   const pathParts = path.split("/").filter(Boolean);
 
-  // Expose back navigation to parent for Android back gesture
-  // At mount point (initialPath) or fs root: back = disconnect. Else: close preview or navigate up.
+  // Back navigation
   const rootPath = (initialPath || "/home").replace(/\/$/, "") || "/";
   const atMountPoint = path.replace(/\/$/, "") === rootPath || path === "/";
   useImperativeHandle(
     onBackRef,
     () => ({
-      canGoBack: () => !!preview || (!atMountPoint && pathParts.length > 1),
+      canGoBack: () => !!imageViewer || !!preview || (!atMountPoint && pathParts.length > 1),
       handleBack: () => {
-        if (preview) setPreview(null);
+        if (imageViewer) setImageViewer(null);
+        else if (preview) setPreview(null);
         else if (!atMountPoint && pathParts.length > 1) {
           const parent = path.split("/").slice(0, -1).join("/") || "/";
           loadDir(parent);
         }
       },
     }),
-    [preview, path, pathParts.length, loadDir, atMountPoint, rootPath],
+    [imageViewer, preview, path, pathParts.length, loadDir, atMountPoint, rootPath],
   );
+
+  // ─── Image viewer overlay ─────────────────────────────────────────────────
+  if (imageViewer) {
+    return (
+      <ImageViewer
+        sessionId={sessionId}
+        images={imageViewer.images}
+        initialIndex={imageViewer.index}
+        onClose={() => setImageViewer(null)}
+      />
+    );
+  }
 
   if (preview) {
     return (
@@ -270,6 +361,54 @@ function FileBrowserInner({
       />
     );
   }
+
+  // ─── Helpers for rendering entry icons ───────────────────────────────────
+  const renderEntryIcon = (entry: FileEntry) => {
+    if (entry.is_dir) {
+      return (
+        <Box
+          sx={{
+            width: 40,
+            height: 40,
+            borderRadius: "12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: (theme) => `${theme.palette.warning.main}1a`,
+          }}
+        >
+          <FolderIcon sx={{ fontSize: 22, color: "warning.main" }} />
+        </Box>
+      );
+    }
+
+    if (entry.is_image) {
+      return (
+        <ImageThumbnail
+          sessionId={sessionId}
+          entry={entry}
+          onClick={() => handleEntryClick(entry)}
+          onLongPress={(target) => setContextMenu({ entry, anchorEl: target })}
+        />
+      );
+    }
+
+    return (
+      <Box
+        sx={{
+          width: 40,
+          height: 40,
+          borderRadius: "12px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          bgcolor: (theme) => `${theme.palette.info.main}1a`,
+        }}
+      >
+        <InsertDriveFileIcon sx={{ fontSize: 22, color: "info.main" }} />
+      </Box>
+    );
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", flex: 1 }}>
@@ -394,13 +533,20 @@ function FileBrowserInner({
               <ListItem key={entry.path} disablePadding>
                 <ListItemButton
                   onClick={() => {
+                    // Don't fire click if long-press was triggered
+                    // (but for image entries, click is handled inside ImageThumbnail)
+                    if (entry.is_image) return;
                     if (longPressTriggered.current) return;
                     handleEntryClick(entry);
                   }}
-                  onMouseDown={(e) => startLongPress(entry, e.currentTarget)}
+                  onMouseDown={(e) => {
+                    if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                  }}
                   onMouseUp={clearLongPress}
                   onMouseLeave={clearLongPress}
-                  onTouchStart={(e) => startLongPress(entry, e.currentTarget)}
+                  onTouchStart={(e) => {
+                    if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                  }}
                   onTouchEnd={clearLongPress}
                   onTouchCancel={clearLongPress}
                   onContextMenu={(e) => {
@@ -410,25 +556,7 @@ function FileBrowserInner({
                   sx={{ minHeight: 48 }}
                 >
                   <ListItemIcon sx={{ minWidth: 52 }}>
-                    <Box
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "12px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        bgcolor: (theme) => entry.is_dir
-                          ? `${theme.palette.warning.main}1a`
-                          : `${theme.palette.info.main}1a`,
-                      }}
-                    >
-                      {entry.is_dir ? (
-                        <FolderIcon sx={{ fontSize: 22, color: "warning.main" }} />
-                      ) : (
-                        <InsertDriveFileIcon sx={{ fontSize: 22, color: "info.main" }} />
-                      )}
-                    </Box>
+                    {renderEntryIcon(entry)}
                   </ListItemIcon>
                   <ListItemText
                     primary={
@@ -469,16 +597,34 @@ function FileBrowserInner({
         )}
       </Box>
 
+      {/* Context menu */}
       <Menu
         open={!!contextMenu}
         anchorEl={contextMenu?.anchorEl}
         onClose={() => setContextMenu(null)}
         anchorOrigin={{ vertical: "center", horizontal: "center" }}
         transformOrigin={{ vertical: "top", horizontal: "center" }}
+        PaperProps={{
+          sx: { borderRadius: 2, minWidth: 200 },
+        }}
       >
+        <MenuItem onClick={handleOpenFromMenu}>
+          <PlayArrowIcon fontSize="small" sx={{ mr: 1.5, color: "primary.main" }} />
+          Open
+        </MenuItem>
+        {contextMenu?.entry.is_image && (
+          <MenuItem onClick={handleOpenWithFromMenu} disabled={downloading}>
+            <OpenInNewIcon fontSize="small" sx={{ mr: 1.5, color: "info.main" }} />
+            Open with another app
+          </MenuItem>
+        )}
         <MenuItem onClick={handleDownloadFromMenu} disabled={downloading}>
-          <DownloadIcon fontSize="small" sx={{ mr: 1.5 }} />
-          {downloading ? "Downloading..." : "Download"}
+          <DownloadIcon fontSize="small" sx={{ mr: 1.5, color: "success.main" }} />
+          {downloading ? "Downloading…" : "Download"}
+        </MenuItem>
+        <MenuItem onClick={handleDeleteFromMenu} sx={{ color: "error.main" }}>
+          <DeleteIcon fontSize="small" sx={{ mr: 1.5 }} />
+          Delete
         </MenuItem>
       </Menu>
 
@@ -487,14 +633,14 @@ function FileBrowserInner({
         open={isUploading || downloading}
         sx={{
           zIndex: 2000,
-          flexDirection: 'column',
+          flexDirection: "column",
           gap: 2,
-          bgcolor: 'rgba(0, 0, 0, 0.7)'
+          bgcolor: "rgba(0, 0, 0, 0.7)",
         }}
       >
         <CircularProgress color="primary" />
         <Typography variant="h6" color="white" fontWeight="500">
-          {isUploading ? "Uploading file..." : "Downloading..."}
+          {isUploading ? "Uploading file…" : "Downloading…"}
         </Typography>
       </Backdrop>
 
@@ -517,16 +663,63 @@ function FileBrowserInner({
               overflowY: "auto",
               fontFamily: "monospace",
               p: 1.5,
-              bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
-              borderRadius: 1
+              bgcolor: (theme) =>
+                theme.palette.mode === "dark" ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.05)",
+              borderRadius: 1,
             }}
           >
             {error}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 0 }}>
-          <Button onClick={() => setError(null)} variant="contained" color="primary" disableElevation sx={{ borderRadius: 2 }}>
+          <Button
+            onClick={() => setError(null)}
+            variant="contained"
+            color="primary"
+            disableElevation
+            sx={{ borderRadius: 2 }}
+          >
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm Delete Dialog */}
+      <Dialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 600 }}>Delete File</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Are you sure you want to delete{" "}
+            <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
+              {deleteTarget?.name}
+            </Box>
+            ? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, pt: 0, gap: 1 }}>
+          <Button
+            onClick={() => setDeleteTarget(null)}
+            disabled={isDeleting}
+            sx={{ borderRadius: 2 }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmDelete}
+            variant="contained"
+            color="error"
+            disabled={isDeleting}
+            disableElevation
+            sx={{ borderRadius: 2 }}
+            startIcon={isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
+          >
+            Delete
           </Button>
         </DialogActions>
       </Dialog>
@@ -552,7 +745,7 @@ function FileBrowserInner({
       <Box
         sx={{
           position: "fixed",
-          bottom: 88, // Pushed closer to the bottom (was 104)
+          bottom: 88,
           right: 24,
           zIndex: 1400,
           display: "flex",
@@ -573,14 +766,7 @@ function FileBrowserInner({
             transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
           }}
         >
-          <Card
-            elevation={4}
-            sx={{
-              borderRadius: 8,
-              bgcolor: "background.paper",
-              overflow: "hidden",
-            }}
-          >
+          <Card elevation={4} sx={{ borderRadius: 8, bgcolor: "background.paper", overflow: "hidden" }}>
             <ListItemButton onClick={handleCreateFolderStart} sx={{ py: 1.5, px: 2.5 }}>
               <ListItemIcon sx={{ minWidth: 40 }}>
                 <CreateNewFolderIcon color="action" />
@@ -589,14 +775,7 @@ function FileBrowserInner({
             </ListItemButton>
           </Card>
 
-          <Card
-            elevation={4}
-            sx={{
-              borderRadius: 8,
-              bgcolor: "background.paper",
-              overflow: "hidden",
-            }}
-          >
+          <Card elevation={4} sx={{ borderRadius: 8, bgcolor: "background.paper", overflow: "hidden" }}>
             <ListItemButton onClick={handleUploadFile} sx={{ py: 1.5, px: 2.5 }}>
               <ListItemIcon sx={{ minWidth: 40 }}>
                 <FileUploadIcon color="action" />
@@ -610,9 +789,9 @@ function FileBrowserInner({
           component="button"
           onClick={handleFabToggle}
           sx={{
-            width: 64, // Increased size (was 56)
-            height: 64, // Increased size (was 56)
-            borderRadius: "20px", // Adjusted for slightly more squircle look
+            width: 64,
+            height: 64,
+            borderRadius: "20px",
             bgcolor: "primary.main",
             color: "primary.contrastText",
             border: "none",
@@ -627,12 +806,10 @@ function FileBrowserInner({
             "&:active": {
               transform: fabOpen ? "rotate(45deg) scale(0.95)" : "rotate(0deg) scale(0.95)",
             },
-            "&:hover": {
-              bgcolor: "primary.dark",
-            },
+            "&:hover": { bgcolor: "primary.dark" },
           }}
         >
-          <AddIcon sx={{ fontSize: 36 }} /> {/* Increased icon size */}
+          <AddIcon sx={{ fontSize: 36 }} />
         </Box>
       </Box>
 
@@ -715,7 +892,7 @@ function FileBrowserInner({
                     display: "flex",
                     alignItems: "center",
                     gap: 1,
-                    opacity: (!newFolderName.trim() || isCreatingFolder) ? 0.5 : 1,
+                    opacity: !newFolderName.trim() || isCreatingFolder ? 0.5 : 1,
                   }}
                 >
                   {isCreatingFolder && <CircularProgress size={16} color="inherit" />}

@@ -8,6 +8,23 @@ Tracked improvements for SFTP file browsing and overall app responsiveness.
       so a single SFTP channel is opened once per connection and reused for all operations.
       _Files: `ssh_manager.rs`, `sftp_ops.rs`_
 
+- [x] **Range-read for thumbnails** — `get_thumbnail` now uses `sftp.open()` +
+      `AsyncReadExt::read(max_bytes)` so only the first N bytes cross the network.
+      Default is **32 KB** (reduced from 256 KB, an **8× bandwidth saving** per thumbnail).
+
+  > ⚠️ **Known trade-off — partial JPEG rendering (32 KB limit)**
+  >
+  > JPEG files store image data progressively after their header. Reading only the first 32 KB
+  > typically yields a recognisable blurry preview for images up to ~2–3 MP. For very large
+  > images (RAW, high-res PNG, multi-MB JPEG) the partial data may not decode to a visible image
+  > and the thumbnail will appear broken.
+  >
+  > **Tuning knob:** raise `max_bytes` in `commands.rs` (`sftp_get_thumbnail`) and in
+  > `ImageThumbnail.tsx` (`maxBytes: 32 * 1024`) — try 64 KB or 128 KB if broken thumbnails
+  > are reported. Full correctness is guaranteed only when `max_bytes >= file size`.
+  >
+  > _File: `sftp_ops.rs` — `get_thumbnail()`_
+
 - [ ] **Range-read for file previews** — `read_file_preview` currently downloads the entire file
       into memory, then truncates to `max_bytes`. Use SFTP `open` + `read(offset, len)` to fetch
       only the first N bytes without transferring the full file.
@@ -65,16 +82,16 @@ Tracked improvements for SFTP file browsing and overall app responsiveness.
 
 ## Priority Order
 
-| #  | Item                            | Impact | Effort |
-|----|---------------------------------|--------|--------|
-| 1  | ~~Reuse SFTP sessions~~         | High   | Low    |
-| 2  | Range-read for file previews    | High   | Low    |
-| 3  | Directory cache with TTL        | Medium | Medium |
-| 4  | Virtualize file list            | Medium | Medium |
-| 5  | Paginate / lazy-load listings   | Medium | High   |
-| 6  | Prefetch child directories      | Medium | Medium |
-| 7  | Return raw timestamps           | Medium | Low    |
-| 8  | Optimistic navigation           | Low    | Low    |
-| 9  | Skeleton / shimmer loading      | Low    | Low    |
-| 10 | Allocation-free sort            | Low    | Low    |
-| 11 | Fix useEffect dependencies      | Low    | Low    |
+| #   | Item                          | Impact | Effort |
+| --- | ----------------------------- | ------ | ------ |
+| 1   | ~~Reuse SFTP sessions~~       | High   | Low    |
+| 2   | Range-read for file previews  | High   | Low    |
+| 3   | Directory cache with TTL      | Medium | Medium |
+| 4   | Virtualize file list          | Medium | Medium |
+| 5   | Paginate / lazy-load listings | Medium | High   |
+| 6   | Prefetch child directories    | Medium | Medium |
+| 7   | Return raw timestamps         | Medium | Low    |
+| 8   | Optimistic navigation         | Low    | Low    |
+| 9   | Skeleton / shimmer loading    | Low    | Low    |
+| 10  | Allocation-free sort          | Low    | Low    |
+| 11  | Fix useEffect dependencies    | Low    | Low    |
