@@ -70,7 +70,7 @@ function App() {
 
   // Android back gesture: navigate in-app, or exit on double-back at root
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let unlisten: Awaited<ReturnType<typeof registerBackEvent>> | undefined;
     const setup = async () => {
       try {
         unlisten = await registerBackEvent(() => {
@@ -110,7 +110,9 @@ function App() {
       }
     };
     setup();
-    return () => unlisten?.();
+    return () => {
+      unlisten?.unregister();
+    };
   }, []);
 
   useEffect(() => {
@@ -219,6 +221,7 @@ function App() {
         swipeAreaWidth={60}
         minFlingVelocity={250}
         hysteresis={0.3}
+        SwipeAreaProps={{ sx: { zIndex: 1099 } }}
         sx={{
           "& .MuiDrawer-paper": {
             width: DRAWER_WIDTH,
