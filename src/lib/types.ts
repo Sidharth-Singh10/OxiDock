@@ -30,13 +30,17 @@ export interface SessionInfo {
   user: string;
 }
 
+export type AuthMethod = "key" | "password";
+
 export interface ServerConfig {
   id: string;
   name: string;
   host: string;
   port: number;
   username: string;
-  keyName: string;
+  authMethod: AuthMethod;
+  keyName?: string;
+  password?: string;
   defaultMountPoint?: string;
   isDefault?: boolean;
 }

@@ -102,7 +102,7 @@ impl SshSessionManager {
     }
 
     /// Connect to an SSH server using a stored key.
-    pub async fn connect(
+    pub async fn connect_with_key(
         &self,
         host: &str,
         port: u16,
@@ -110,10 +110,8 @@ impl SshSessionManager {
         key_name: &str,
         passphrase: Option<&str>,
     ) -> AppResult<String> {
-        // Retrieve key PEM from vault
         let pem = self.key_store.retrieve_key_pem(key_name).await?;
 
-        // Parse the private key using russh's re-exported ssh-key crate
         let private_key = if let Some(pass) = passphrase {
             PrivateKey::from_openssh(pem.as_bytes())
                 .and_then(|k| k.decrypt(pass))
@@ -123,22 +121,8 @@ impl SshSessionManager {
                 .map_err(|e| AppError::Ssh(format!("Failed to decode key: {e}")))?
         };
 
-        // Resolve address
-        let addr = format!("{host}:{port}")
-            .to_socket_addrs()
-            .map_err(|e| AppError::Ssh(format!("Failed to resolve host: {e}")))?
-            .next()
-            .ok_or_else(|| AppError::Ssh("Could not resolve host address".into()))?;
+        let mut handle = self.establish_connection(host, port).await?;
 
-        // Build SSH config
-        let config = Arc::new(client::Config::default());
-
-        // Connect
-        let mut handle = client::connect(config, addr, ClientHandler)
-            .await
-            .map_err(|e| AppError::Ssh(format!("Connection failed: {e}")))?;
-
-        // Get best RSA hash algorithm
         let hash_alg = handle
             .best_supported_rsa_hash()
             .await
@@ -146,10 +130,8 @@ impl SshSessionManager {
             .flatten()
             .flatten();
 
-        // Wrap the key with hash algorithm for authentication
         let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg);
 
-        // Authenticate
         let auth_result = handle
             .authenticate_publickey(user, key_with_hash)
             .await
@@ -159,6 +141,55 @@ impl SshSessionManager {
             return Err(AppError::Ssh("Authentication rejected by server".into()));
         }
 
+        self.store_session(handle, host, user).await
+    }
+
+    /// Connect to an SSH server using a password.
+    pub async fn connect_with_password(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+    ) -> AppResult<String> {
+        let mut handle = self.establish_connection(host, port).await?;
+
+        let auth_result = handle
+            .authenticate_password(user, password)
+            .await
+            .map_err(|e| AppError::Ssh(format!("Auth failed: {e}")))?;
+
+        if !auth_result.success() {
+            return Err(AppError::Ssh("Authentication rejected by server".into()));
+        }
+
+        self.store_session(handle, host, user).await
+    }
+
+    async fn establish_connection(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> AppResult<client::Handle<ClientHandler>> {
+        let addr = format!("{host}:{port}")
+            .to_socket_addrs()
+            .map_err(|e| AppError::Ssh(format!("Failed to resolve host: {e}")))?
+            .next()
+            .ok_or_else(|| AppError::Ssh("Could not resolve host address".into()))?;
+
+        let config = Arc::new(client::Config::default());
+
+        client::connect(config, addr, ClientHandler)
+            .await
+            .map_err(|e| AppError::Ssh(format!("Connection failed: {e}")))
+    }
+
+    async fn store_session(
+        &self,
+        handle: client::Handle<ClientHandler>,
+        host: &str,
+        user: &str,
+    ) -> AppResult<String> {
         let session_id = Uuid::new_v4().to_string();
         let session = Arc::new(SshSession {
             handle,
@@ -190,6 +221,73 @@ impl SshSessionManager {
         } else {
             Err(AppError::SessionNotFound(session_id.to_string()))
         }
+    }
+
+    /// Test a key-based connection without storing the session.
+    pub async fn test_connection_with_key(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        key_name: &str,
+        passphrase: Option<&str>,
+    ) -> AppResult<()> {
+        let pem = self.key_store.retrieve_key_pem(key_name).await?;
+
+        let private_key = if let Some(pass) = passphrase {
+            PrivateKey::from_openssh(pem.as_bytes())
+                .and_then(|k| k.decrypt(pass))
+                .map_err(|e| AppError::Ssh(format!("Failed to decode key: {e}")))?
+        } else {
+            PrivateKey::from_openssh(pem.as_bytes())
+                .map_err(|e| AppError::Ssh(format!("Failed to decode key: {e}")))?
+        };
+
+        let mut handle = self.establish_connection(host, port).await?;
+
+        let hash_alg = handle
+            .best_supported_rsa_hash()
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+
+        let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg);
+
+        let auth_result = handle
+            .authenticate_publickey(user, key_with_hash)
+            .await
+            .map_err(|e| AppError::Ssh(format!("Auth failed: {e}")))?;
+
+        if !auth_result.success() {
+            return Err(AppError::Ssh("Authentication rejected by server".into()));
+        }
+
+        let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        Ok(())
+    }
+
+    /// Test a password-based connection without storing the session.
+    pub async fn test_connection_with_password(
+        &self,
+        host: &str,
+        port: u16,
+        user: &str,
+        password: &str,
+    ) -> AppResult<()> {
+        let mut handle = self.establish_connection(host, port).await?;
+
+        let auth_result = handle
+            .authenticate_password(user, password)
+            .await
+            .map_err(|e| AppError::Ssh(format!("Auth failed: {e}")))?;
+
+        if !auth_result.success() {
+            return Err(AppError::Ssh("Authentication rejected by server".into()));
+        }
+
+        let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        Ok(())
     }
 
     /// List active session IDs with metadata.

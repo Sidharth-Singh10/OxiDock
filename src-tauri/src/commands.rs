@@ -45,14 +45,25 @@ pub async fn ssh_connect(
     host: String,
     port: u16,
     user: String,
-    key_name: String,
+    key_name: Option<String>,
     passphrase: Option<String>,
+    password: Option<String>,
 ) -> AppResult<String> {
     log::info!("[SSH] Connecting to {}@{}:{}", user, host, port);
     let start = std::time::Instant::now();
-    let result = session_mgr
-        .connect(&host, port, &user, &key_name, passphrase.as_deref())
-        .await;
+    let result = if let Some(pw) = password {
+        session_mgr
+            .connect_with_password(&host, port, &user, &pw)
+            .await
+    } else if let Some(ref kn) = key_name {
+        session_mgr
+            .connect_with_key(&host, port, &user, kn, passphrase.as_deref())
+            .await
+    } else {
+        Err(AppError::Ssh(
+            "Either key_name or password must be provided".into(),
+        ))
+    };
     match &result {
         Ok(session_id) => log::info!(
             "[SSH] Connected in {:.2}ms — session_id={}",
@@ -61,6 +72,45 @@ pub async fn ssh_connect(
         ),
         Err(e) => log::error!(
             "[SSH] Connection failed after {:.2}ms — {}",
+            start.elapsed().as_secs_f64() * 1000.0,
+            e,
+        ),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn ssh_test_connection(
+    session_mgr: State<'_, Arc<SshSessionManager>>,
+    host: String,
+    port: u16,
+    user: String,
+    key_name: Option<String>,
+    passphrase: Option<String>,
+    password: Option<String>,
+) -> AppResult<()> {
+    log::info!("[SSH] Testing connection to {}@{}:{}", user, host, port);
+    let start = std::time::Instant::now();
+    let result = if let Some(pw) = password {
+        session_mgr
+            .test_connection_with_password(&host, port, &user, &pw)
+            .await
+    } else if let Some(ref kn) = key_name {
+        session_mgr
+            .test_connection_with_key(&host, port, &user, kn, passphrase.as_deref())
+            .await
+    } else {
+        Err(AppError::Ssh(
+            "Either key_name or password must be provided".into(),
+        ))
+    };
+    match &result {
+        Ok(()) => log::info!(
+            "[SSH] Test connection succeeded in {:.2}ms",
+            start.elapsed().as_secs_f64() * 1000.0,
+        ),
+        Err(e) => log::error!(
+            "[SSH] Test connection failed after {:.2}ms — {}",
             start.elapsed().as_secs_f64() * 1000.0,
             e,
         ),

@@ -127,8 +127,9 @@ function App() {
       host: server.host,
       port: server.port,
       user: server.username,
-      keyName: server.keyName,
+      keyName: server.authMethod === "key" ? server.keyName : null,
       passphrase: null,
+      password: server.authMethod === "password" ? server.password : null,
     })
       .then((sessionId) => {
         setActiveSession({

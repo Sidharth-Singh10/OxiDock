@@ -52,6 +52,7 @@ pub fn run() {
             commands::get_key,
             commands::list_supported_key_types,
             commands::ssh_connect,
+            commands::ssh_test_connection,
             commands::ssh_disconnect,
             commands::ssh_list_sessions,
             commands::sftp_list_dir,
