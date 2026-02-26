@@ -321,14 +321,30 @@ pub async fn sftp_upload_file(
 
 #[tauri::command]
 pub async fn sftp_get_thumbnail(
+    app: tauri::AppHandle,
     session_mgr: State<'_, Arc<SshSessionManager>>,
     session_id: String,
     path: String,
     max_bytes: Option<usize>,
 ) -> AppResult<String> {
     log::debug!("[CMD] sftp_get_thumbnail called — path=\"{}\"", path);
+
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::Sftp(format!("Cannot determine cache dir: {e}")))?;
+    let thumb_cache_dir = cache_dir.join("thumbnails");
+    std::fs::create_dir_all(&thumb_cache_dir)
+        .map_err(|e| AppError::Sftp(format!("Cannot create thumbnail cache dir: {e}")))?;
+
     let session = session_mgr.get_session(&session_id).await?;
-    sftp_ops::get_thumbnail(&session, &path, max_bytes.unwrap_or(128 * 1024)).await
+    sftp_ops::get_thumbnail(
+        &session,
+        &path,
+        max_bytes.unwrap_or(128 * 1024),
+        &thumb_cache_dir,
+    )
+    .await
 }
 
 #[tauri::command]

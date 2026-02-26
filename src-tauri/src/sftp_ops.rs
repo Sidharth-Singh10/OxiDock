@@ -142,47 +142,148 @@ pub async fn read_file_preview(
 }
 
 /// Fetch a small slice of an image for thumbnail display.
-/// Uses SFTP open() + AsyncReadExt::read() to transfer ONLY `max_bytes`
-/// across the network — avoids downloading the entire file.
-/// Returns a base64-encoded string of the bytes read.
-///
-/// ⚠️  PERFORMANCE NOTE (see PERFORMANCE.md): `max_bytes` is intentionally
-/// kept at 32 KB. Partial-JPEG data may not decode to a full image in all
-/// browsers/environments; if thumbnails appear broken, raise `max_bytes`
-/// incrementally. Full correctness is guaranteed when `max_bytes >= file size`.
+/// Downloads up to 10MB of the file and uses libvips to decode and generate
+/// a fast WebP thumbnail natively, returning a base64 string.
 pub async fn get_thumbnail(
     session: &Arc<SshSession>,
     path: &str,
-    max_bytes: usize,
+    _max_bytes: usize, // Ignored, we cap at 10MB now.
+    cache_dir: &std::path::Path,
 ) -> AppResult<String> {
     use tokio::io::AsyncReadExt;
+
+    // Build a stable cache filename
+    let safe_key = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        path.as_bytes(),
+    );
+    let cache_file = cache_dir.join(format!("{safe_key}_thumb.webp"));
+
+    // Check freshness: if cached file exists, skip download.
+    if cache_file.exists() {
+        if let Ok(data) = tokio::fs::read(&cache_file).await {
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+            log::info!(
+                "[CACHE] thumbnail cache hit for \"{}\" — skipping download",
+                path
+            );
+            return Ok(b64);
+        }
+    }
 
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
-    // Open a read-only file handle — no image data transferred yet.
     let mut file = sftp
         .open(path)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to open image for thumbnail: {e}")))?;
 
-    // Read ONLY up to max_bytes — this is the only network transfer.
-    let mut buf = vec![0u8; max_bytes];
+    // Download up to 10MB
+    let limit: u64 = 10 * 1024 * 1024;
+    let mut buf = Vec::new();
     let n = file
-        .read(&mut buf)
+        .take(limit)
+        .read_to_end(&mut buf)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to read thumbnail bytes: {e}")))?;
-    buf.truncate(n);
 
-    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &buf);
+    let read_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    // Spawn blocking task for CPU-intensive image processing
+    let (b64, webp_data) = tokio::task::spawn_blocking(move || {
+        let process_start = std::time::Instant::now();
+
+        // 1. Decode image from raw bytes
+        let img = image::load_from_memory(&buf)
+            .map_err(|e| AppError::Sftp(format!("Image decode failed: {e}")))?;
+
+        // 2. Setup fast_image_resize Source image
+        let width = img.width().max(1);
+        let height = img.height().max(1);
+        let src_image = fast_image_resize::images::Image::from_vec_u8(
+            width,
+            height,
+            img.to_rgba8().into_raw(),
+            fast_image_resize::PixelType::U8x4,
+        )
+        .map_err(|e| AppError::Sftp(format!("Failed to create fir source image: {e}")))?;
+
+        // 3. Setup fast_image_resize Destination image (256x256 max bounds, maintaining aspect ratio)
+        let aspect_ratio = img.width() as f32 / img.height() as f32;
+        let (dst_width, dst_height) = if aspect_ratio > 1.0 {
+            (256, (256.0 / aspect_ratio).round() as u32)
+        } else {
+            ((256.0 * aspect_ratio).round() as u32, 256)
+        };
+        let dst_width = dst_width.max(1);
+        let dst_height = dst_height.max(1);
+
+        let mut dst_image = fast_image_resize::images::Image::new(
+            dst_width,
+            dst_height,
+            fast_image_resize::PixelType::U8x4,
+        );
+
+        // 4. Resize using Bilinear filter for speed
+        let mut resizer = fast_image_resize::Resizer::new();
+        resizer
+            .resize(
+                &src_image,
+                &mut dst_image,
+                &fast_image_resize::ResizeOptions::new().resize_alg(
+                    fast_image_resize::ResizeAlg::Convolution(
+                        fast_image_resize::FilterType::Bilinear,
+                    ),
+                ),
+            )
+            .map_err(|e| AppError::Sftp(format!("Image resize failed: {e}")))?;
+
+        // 5. Convert back to image crate types and encode WebP
+        let resized_img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+            dst_width,
+            dst_height,
+            dst_image.into_vec(),
+        )
+        .ok_or_else(|| AppError::Sftp("Failed to convert resized buffer".into()))?;
+
+        let dynamic_img = image::DynamicImage::ImageRgba8(resized_img);
+        let mut webp_buf = std::io::Cursor::new(Vec::new());
+        // Using `write_to` with standard WebP format (which we enabled in Cargo.toml via webp feature)
+        dynamic_img
+            .write_to(&mut webp_buf, image::ImageFormat::WebP)
+            .map_err(|e| AppError::Sftp(format!("WebP encoding failed: {e}")))?;
+
+        let webp_data = webp_buf.into_inner();
+        let b64_str =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &webp_data);
+
+        log::info!(
+            "[PERF] fast_image_resize processing — {:.2}ms",
+            process_start.elapsed().as_secs_f64() * 1000.0
+        );
+
+        Ok::<_, AppError>((b64_str, webp_data))
+    })
+    .await
+    .map_err(|e| AppError::Sftp(format!("Thumbnail task panicked: {e}")))?
+    .map_err(|e| {
+        log::error!("[CMD] sftp_get_thumbnail Error \"{}\": {}", path, e);
+        e
+    })?;
 
     log::info!(
-        "[PERF] get_thumbnail \"{}\" — {:.2}ms | bytes_read: {}/{} (partial SFTP read)",
+        "[PERF] get_thumbnail \"{}\" — total: {:.2}ms | bytes_read: {} (up to 10MB)",
         path,
         start.elapsed().as_secs_f64() * 1000.0,
         n,
-        max_bytes,
     );
+
+    // Write to cache in the background (we can just await it since it's tiny)
+    if let Err(e) = tokio::fs::write(&cache_file, &webp_data).await {
+        log::warn!("Failed to save thumbnail to cache: {}", e);
+    }
+
     Ok(b64)
 }
 

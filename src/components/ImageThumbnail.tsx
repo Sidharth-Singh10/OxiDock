@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Box, CircularProgress } from "@mui/material";
 import ImageIcon from "@mui/icons-material/Image";
-import BrokenImageIcon from "@mui/icons-material/BrokenImage";
 import type { FileEntry } from "../lib/types";
 import {
   getThumbnailCached,
@@ -57,8 +56,6 @@ export default function ImageThumbnail({ sessionId, entry, onClick, onLongPress 
         invoke<string>("sftp_get_thumbnail", {
           sessionId,
           path: entry.path,
-          // 128 KB — covers most real-world JPEGs at thumbnail size.
-          maxBytes: 128 * 1024,
         })
           .then((data) => {
             setThumbnailCached(entry.path, data);
@@ -124,14 +121,11 @@ export default function ImageThumbnail({ sessionId, entry, onClick, onLongPress 
           alt={entry.name}
           sx={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
-      ) : status === "error" ? (
-        <BrokenImageIcon sx={{ fontSize: 20, color: "error.main", opacity: 0.7 }} />
+      ) : status === "error" || status === "idle" ? (
+        <ImageIcon sx={{ fontSize: 22, color: "success.main", opacity: 0.6 }} />
       ) : status === "loading" ? (
         <CircularProgress size={16} thickness={4} />
-      ) : (
-        /* "idle" — placeholder before the IntersectionObserver fires */
-        <ImageIcon sx={{ fontSize: 22, color: "success.main", opacity: 0.6 }} />
-      )}
+      ) : null}
     </Box>
   );
 }

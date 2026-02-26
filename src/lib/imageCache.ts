@@ -3,7 +3,7 @@
  * Prevents redundant SFTP downloads when the user revisits images.
  *
  * Two separate caches:
- *  - thumbnailCache  — stores base64 strings from sftp_get_thumbnail (32 KB partial reads)
+ *  - thumbnailCache  — stores base64 strings from sftp_get_thumbnail (native WebP thumbnails)
  *  - fullImageCache  — stores local file paths from sftp_cache_image (full downloads)
  */
 
