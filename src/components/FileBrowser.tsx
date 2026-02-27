@@ -36,6 +36,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 
 import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
+import { getDirCached, setDirCached, invalidateDirCache, prefetchChildren } from "../lib/dirCache";
 import FilePreview from "./FilePreview";
 import ImageThumbnail from "./ImageThumbnail";
 import ImageViewer from "./ImageViewer";
@@ -109,6 +110,7 @@ function FileBrowserInner({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentPathRef = useRef(path);
 
   const handleFabToggle = () => setFabOpen(!fabOpen);
 
@@ -131,6 +133,7 @@ function FileBrowserInner({
       });
       setSnackbar("Folder created successfully");
       setCreateFolderDialogOpen(false);
+      invalidateDirCache(path);
       loadDir(path);
     } catch (err) {
       setError(`Failed to create folder: ${err}`);
@@ -161,6 +164,7 @@ function FileBrowserInner({
       });
 
       setSnackbar("File uploaded successfully");
+      invalidateDirCache(path);
       loadDir(path);
     } catch (err) {
       setError(`Upload failed: ${err}`);
@@ -174,6 +178,26 @@ function FileBrowserInner({
 
   const loadDir = useCallback(
     async (dirPath: string) => {
+      const cached = getDirCached(dirPath);
+      if (cached) {
+        setEntries(cached);
+        setPath(dirPath);
+        setError(null);
+        currentPathRef.current = dirPath;
+
+        // Stale-while-revalidate: refresh in the background
+        invoke<FileEntry[]>("sftp_list_dir", { sessionId, path: dirPath })
+          .then((result) => {
+            setDirCached(dirPath, result);
+            if (currentPathRef.current === dirPath) {
+              setEntries(result);
+            }
+            prefetchChildren(result, sessionId);
+          })
+          .catch(() => {});
+        return;
+      }
+
       setLoading(true);
       setError(null);
       try {
@@ -181,8 +205,11 @@ function FileBrowserInner({
           sessionId,
           path: dirPath,
         });
+        setDirCached(dirPath, result);
         setEntries(result);
         setPath(dirPath);
+        currentPathRef.current = dirPath;
+        prefetchChildren(result, sessionId);
       } catch (e) {
         setError(String(e));
       } finally {
@@ -300,6 +327,7 @@ function FileBrowserInner({
       });
       setSnackbar(`Deleted ${deleteTarget.name}`);
       setDeleteTarget(null);
+      invalidateDirCache(path);
       loadDir(path);
     } catch (err) {
       setError(`Delete failed: ${err}`);

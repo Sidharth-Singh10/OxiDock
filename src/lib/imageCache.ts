@@ -8,6 +8,7 @@
  */
 
 import type { ImageCacheEntry } from "./types";
+import { clearDirCache } from "./dirCache";
 
 // ─── Full-image cache (local file paths) ─────────────────────────────────────
 
@@ -56,8 +57,9 @@ export function isThumbnailCached(remotePath: string): boolean {
 
 // ─── Session cleanup ──────────────────────────────────────────────────────────
 
-/** Clears both caches (call on disconnect). */
+/** Clears all caches — images, thumbnails, and directory listings (call on disconnect). */
 export function clearCache(): void {
   fullImageCache.clear();
   thumbnailCache.clear();
+  clearDirCache();
 }

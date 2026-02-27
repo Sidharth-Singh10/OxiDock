@@ -42,10 +42,13 @@ Tracked improvements for SFTP file browsing and overall app responsiveness.
       frontend, append pages as the user scrolls.
       _Files: `sftp_ops.rs`, `commands.rs`, `FileBrowser.tsx`_
 
-- [ ] **Prefetch child directories** — When a directory is loaded, fire off background `list_dir`
-      calls for the visible subdirectories. This makes drilling down feel instant since results are
-      already cached by the time the user clicks.
-      _Files: `sftp_ops.rs` or `commands.rs` (backend prefetch), `FileBrowser.tsx` (trigger on render)_
+- [x] **Prefetch child directories** — When a directory is loaded, fire off background `list_dir`
+      calls for the visible subdirectories (up to 20) in parallel. Results are stored in an
+      in-memory `dirCache` so drilling down is instant (stale-while-revalidate on navigation).
+      Image thumbnails in child dirs are also prefetched (up to 8 per dir) and warmed into the
+      thumbnail cache. All prefetch work is non-blocking fire-and-forget.
+      _Files: `dirCache.ts` (cache + prefetch logic), `FileBrowser.tsx` (trigger on render),
+      `imageCache.ts` (clears dir cache on session teardown)_
 
 - [ ] **Return raw timestamps instead of formatted strings** — The `modified` field triggers a
       `chrono` conversion per-entry on the backend. Return raw `u64` Unix timestamps (or skip `mtime`
