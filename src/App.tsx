@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AppBar,
@@ -14,6 +14,8 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Menu,
+  MenuItem,
   Snackbar,
   Toolbar,
   Typography,
@@ -29,11 +31,25 @@ import CheckIcon from "@mui/icons-material/Check";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import StorageIcon from "@mui/icons-material/Storage";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
+import ViewListIcon from "@mui/icons-material/ViewList";
+import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import KeyManager from "./components/KeyManager";
 import ServerList from "./components/ServerList";
 import FileBrowser, { type FileBrowserBackHandle } from "./components/FileBrowser";
+import ViewOptionsPopover from "./components/ViewOptionsPopover";
+import FolderOptionsPopover from "./components/FolderOptionsPopover";
 import { useAppTheme } from "./theme/ThemeContext";
-import { getDefaultServer } from "./lib/storage";
+import {
+  getDefaultServer,
+  loadViewSettings,
+  saveViewSettings,
+  loadFolderSettings,
+  saveFolderSettings,
+  loadLastFolder,
+} from "./lib/storage";
+import type { ViewSettings, FolderSettings } from "./lib/types";
 import { registerBackEvent } from "@kingsword/tauri-plugin-mobile-onbackpressed-listener";
 import { exit } from "@tauri-apps/plugin-process";
 
@@ -52,6 +68,23 @@ function App() {
   const [autoConnecting, setAutoConnecting] = useState(false);
   const [autoConnectError, setAutoConnectError] = useState<string | null>(null);
   const [exitSnackbar, setExitSnackbar] = useState(false);
+  const [viewSettings, setViewSettings] = useState<ViewSettings>(loadViewSettings);
+  const [folderSettings, setFolderSettings] = useState<FolderSettings>(loadFolderSettings);
+  const [dotMenuAnchor, setDotMenuAnchor] = useState<HTMLElement | null>(null);
+  const [activePanel, setActivePanel] = useState<"view" | "folder" | null>(null);
+
+  const handleViewSettingsChange = useCallback((next: ViewSettings) => {
+    setViewSettings(next);
+    saveViewSettings(next);
+  }, []);
+
+  const handleFolderSettingsChange = useCallback((next: FolderSettings) => {
+    setFolderSettings(next);
+    saveFolderSettings(next);
+  }, []);
+
+  const handleDotMenuClose = () => setDotMenuAnchor(null);
+  const handlePanelClose = () => setActivePanel(null);
   const autoConnectDone = useRef(false);
   const fileBrowserBackRef = useRef<FileBrowserBackHandle | null>(null);
   const rootBackCountRef = useRef(0);
@@ -200,6 +233,13 @@ function App() {
               </Typography>
               <IconButton
                 size="small"
+                onClick={(e) => setDotMenuAnchor(e.currentTarget)}
+                sx={{ color: "text.secondary", flexShrink: 0 }}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+              <IconButton
+                size="small"
                 onClick={handleDisconnect}
                 sx={{ color: "error.main", flexShrink: 0 }}
               >
@@ -213,6 +253,67 @@ function App() {
           )}
         </Toolbar>
       </AppBar>
+
+      {/* 3-dot top-level menu */}
+      <Menu
+        anchorEl={dotMenuAnchor}
+        open={!!dotMenuAnchor && !activePanel}
+        onClose={handleDotMenuClose}
+        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        transformOrigin={{ vertical: "top", horizontal: "right" }}
+        slotProps={{
+          paper: { sx: { borderRadius: 2, minWidth: 200, mt: 0.5 } },
+        }}
+      >
+        <MenuItem
+          onClick={() => {
+            setDotMenuAnchor(dotMenuAnchor);
+            setActivePanel("view");
+          }}
+        >
+          <ListItemIcon>
+            <ViewListIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View options</ListItemText>
+          <ChevronRightIcon fontSize="small" sx={{ color: "text.secondary" }} />
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setDotMenuAnchor(dotMenuAnchor);
+            setActivePanel("folder");
+          }}
+        >
+          <ListItemIcon>
+            <FolderOpenIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Folder options</ListItemText>
+          <ChevronRightIcon fontSize="small" sx={{ color: "text.secondary" }} />
+        </MenuItem>
+      </Menu>
+
+      {/* View options sub-popover */}
+      <ViewOptionsPopover
+        anchorEl={dotMenuAnchor}
+        open={activePanel === "view"}
+        onClose={() => {
+          handlePanelClose();
+          handleDotMenuClose();
+        }}
+        settings={viewSettings}
+        onChange={handleViewSettingsChange}
+      />
+
+      {/* Folder options sub-popover */}
+      <FolderOptionsPopover
+        anchorEl={dotMenuAnchor}
+        open={activePanel === "folder"}
+        onClose={() => {
+          handlePanelClose();
+          handleDotMenuClose();
+        }}
+        settings={folderSettings}
+        onChange={handleFolderSettingsChange}
+      />
 
       {/* Sidebar Drawer */}
       <SwipeableDrawer
@@ -470,8 +571,10 @@ function App() {
             sessionId={activeSession.sessionId}
             serverName={activeSession.serverName}
             onDisconnect={handleDisconnect}
-            initialPath={activeSession.mountPoint}
+            initialPath={activeSession.mountPoint || (folderSettings.rememberLastFolder ? loadLastFolder() ?? undefined : undefined)}
             onBackRef={fileBrowserBackRef}
+            viewSettings={viewSettings}
+            folderSettings={folderSettings}
           />
         ) : (
           <>

@@ -1,10 +1,77 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::io::AsyncWriteExt;
 
 use crate::errors::{AppError, AppResult};
 use crate::ssh_manager::SshSession;
+
+static THUMB_EVICTION_RUNNING: AtomicBool = AtomicBool::new(false);
+static IMAGE_EVICTION_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// 50 MB cap for the thumbnail disk cache.
+const THUMB_CACHE_MAX_BYTES: u64 = 50 * 1024 * 1024;
+/// 200 MB cap for the full-image disk cache.
+const IMAGE_CACHE_MAX_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Evict oldest files from a cache directory until total size is under `max_bytes`.
+/// Sorts by modification time (oldest first) as an LRU proxy.
+fn evict_cache_lru(cache_dir: &std::path::Path, max_bytes: u64) {
+    let rd = match std::fs::read_dir(cache_dir) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+
+    let mut files: Vec<(std::path::PathBuf, u64, u64)> = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for entry in rd.filter_map(|e| e.ok()) {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let size = meta.len();
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        total_size += size;
+        files.push((entry.path(), size, mtime));
+    }
+
+    if total_size <= max_bytes {
+        return;
+    }
+
+    files.sort_by_key(|&(_, _, mtime)| mtime);
+
+    let to_free = total_size - max_bytes;
+    let mut freed: u64 = 0;
+    let mut evicted = 0u32;
+
+    for (path, size, _) in &files {
+        if freed >= to_free {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            freed += size;
+            evicted += 1;
+        }
+    }
+
+    log::info!(
+        "[CACHE] eviction: removed {} files, freed {:.1} MB (was {:.1} MB, cap {:.1} MB)",
+        evicted,
+        freed as f64 / (1024.0 * 1024.0),
+        total_size as f64 / (1024.0 * 1024.0),
+        max_bytes as f64 / (1024.0 * 1024.0),
+    );
+}
 
 /// A file entry returned to the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -149,6 +216,7 @@ pub async fn get_thumbnail(
     path: &str,
     _max_bytes: usize, // Ignored, we cap at 10MB now.
     cache_dir: &std::path::Path,
+    remote_mtime: Option<u64>,
 ) -> AppResult<String> {
     use tokio::io::AsyncReadExt;
 
@@ -159,15 +227,35 @@ pub async fn get_thumbnail(
     );
     let cache_file = cache_dir.join(format!("{safe_key}_thumb.webp"));
 
-    // Check freshness: if cached file exists, skip download.
+    // Mtime-based freshness: reuse cached thumbnail only if it was written
+    // after the remote file was last modified.
     if cache_file.exists() {
-        if let Ok(data) = tokio::fs::read(&cache_file).await {
-            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+        let fresh = if let Some(remote_mt) = remote_mtime {
+            std::fs::metadata(&cache_file)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() >= remote_mt)
+                .unwrap_or(false)
+        } else {
+            true // no mtime info — trust existing cache
+        };
+
+        if fresh {
+            if let Ok(data) = tokio::fs::read(&cache_file).await {
+                let b64 =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+                log::info!(
+                    "[CACHE] thumbnail cache hit for \"{}\" — skipping download",
+                    path
+                );
+                return Ok(b64);
+            }
+        } else {
             log::info!(
-                "[CACHE] thumbnail cache hit for \"{}\" — skipping download",
+                "[CACHE] thumbnail stale for \"{}\" — remote mtime is newer, regenerating",
                 path
             );
-            return Ok(b64);
         }
     }
 
@@ -284,6 +372,15 @@ pub async fn get_thumbnail(
         log::warn!("Failed to save thumbnail to cache: {}", e);
     }
 
+    // Background LRU eviction — keep thumbnail dir under THUMB_CACHE_MAX_BYTES
+    if !THUMB_EVICTION_RUNNING.swap(true, Ordering::Relaxed) {
+        let dir = cache_dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            evict_cache_lru(&dir, THUMB_CACHE_MAX_BYTES);
+            THUMB_EVICTION_RUNNING.store(false, Ordering::Relaxed);
+        });
+    }
+
     Ok(b64)
 }
 
@@ -343,6 +440,16 @@ pub async fn cache_image(
         start.elapsed().as_secs_f64() * 1000.0,
         data.len(),
     );
+
+    // Background LRU eviction — keep image cache dir under IMAGE_CACHE_MAX_BYTES
+    if !IMAGE_EVICTION_RUNNING.swap(true, Ordering::Relaxed) {
+        let dir = cache_dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            evict_cache_lru(&dir, IMAGE_CACHE_MAX_BYTES);
+            IMAGE_EVICTION_RUNNING.store(false, Ordering::Relaxed);
+        });
+    }
+
     Ok(cache_file.to_string_lossy().to_string())
 }
 

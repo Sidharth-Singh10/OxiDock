@@ -37,6 +37,23 @@ export interface SessionInfo {
   user: string;
 }
 
+export type ViewMode = "list" | "grid" | "compact";
+export type SortBy = "name" | "date" | "size" | "type";
+
+export interface ViewSettings {
+  viewMode: ViewMode;
+  sortBy: SortBy;
+  zoomLevel: number;
+  onlyThisFolder: boolean;
+}
+
+export interface FolderSettings {
+  showHiddenFiles: boolean;
+  foldersFirst: boolean;
+  rememberLastFolder: boolean;
+  showFoldersSize: boolean;
+}
+
 export type AuthMethod = "key" | "password";
 
 export interface ServerConfig {

@@ -53,9 +53,13 @@ export default function ImageThumbnail({ sessionId, entry, onClick, onLongPress 
         }
 
         setStatus("loading");
+        const remoteMtime = entry.modified
+          ? Math.floor(new Date(entry.modified).getTime() / 1000)
+          : undefined;
         invoke<string>("sftp_get_thumbnail", {
           sessionId,
           path: entry.path,
+          remoteMtime,
         })
           .then((data) => {
             setThumbnailCached(entry.path, data);

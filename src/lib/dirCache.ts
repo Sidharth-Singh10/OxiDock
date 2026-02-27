@@ -31,6 +31,11 @@ export function setDirCached(path: string, entries: FileEntry[]): void {
   dirCache.set(path, entries);
 }
 
+export function getDirCachedCount(path: string): number | null {
+  const cached = dirCache.get(path);
+  return cached ? cached.length : null;
+}
+
 export function invalidateDirCache(path: string): void {
   dirCache.delete(path);
 }
@@ -52,7 +57,10 @@ function prefetchThumbnails(entries: FileEntry[], sessionId: string): void {
     if (isThumbnailCached(img.path) || inflightThumbs.has(img.path)) continue;
     inflightThumbs.add(img.path);
 
-    invoke<string>("sftp_get_thumbnail", { sessionId, path: img.path })
+    const remoteMtime = img.modified
+      ? Math.floor(new Date(img.modified).getTime() / 1000)
+      : undefined;
+    invoke<string>("sftp_get_thumbnail", { sessionId, path: img.path, remoteMtime })
       .then((b64) => setThumbnailCached(img.path, b64))
       .catch(() => {})
       .finally(() => inflightThumbs.delete(img.path));

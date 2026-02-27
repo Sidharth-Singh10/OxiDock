@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useImperativeHandle } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useImperativeHandle } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Box,
@@ -35,8 +35,9 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import DeleteIcon from "@mui/icons-material/Delete";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 
-import type { FileEntry, FilePreview as FilePreviewType } from "../lib/types";
-import { getDirCached, setDirCached, invalidateDirCache, prefetchChildren } from "../lib/dirCache";
+import type { FileEntry, FilePreview as FilePreviewType, ViewSettings, FolderSettings } from "../lib/types";
+import { getDirCached, getDirCachedCount, setDirCached, invalidateDirCache, prefetchChildren } from "../lib/dirCache";
+import { saveLastFolder } from "../lib/storage";
 import FilePreview from "./FilePreview";
 import ImageThumbnail from "./ImageThumbnail";
 import ImageViewer from "./ImageViewer";
@@ -52,6 +53,50 @@ interface Props {
   onDisconnect: () => void;
   initialPath?: string;
   onBackRef?: React.RefObject<FileBrowserBackHandle | null>;
+  viewSettings: ViewSettings;
+  folderSettings: FolderSettings;
+}
+
+function getExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+function sortEntries(
+  entries: FileEntry[],
+  sortBy: ViewSettings["sortBy"],
+  foldersFirst: boolean,
+): FileEntry[] {
+  const cmp = (a: FileEntry, b: FileEntry): number => {
+    switch (sortBy) {
+      case "name":
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      case "date": {
+        const ta = a.modified ? new Date(a.modified).getTime() : 0;
+        const tb = b.modified ? new Date(b.modified).getTime() : 0;
+        return tb - ta;
+      }
+      case "size":
+        return b.size - a.size;
+      case "type": {
+        const ea = getExtension(a.name);
+        const eb = getExtension(b.name);
+        return ea.localeCompare(eb) || a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      }
+    }
+  };
+
+  if (foldersFirst) {
+    const dirs = entries.filter((e) => e.is_dir);
+    const files = entries.filter((e) => !e.is_dir);
+    dirs.sort(cmp);
+    files.sort(cmp);
+    return [...dirs, ...files];
+  }
+
+  const sorted = [...entries];
+  sorted.sort(cmp);
+  return sorted;
 }
 
 function formatSize(bytes: number): string {
@@ -66,12 +111,21 @@ function formatSize(bytes: number): string {
   return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
+function formatDirLabel(entry: FileEntry, showSize: boolean): string {
+  if (!showSize) return "dir";
+  const count = getDirCachedCount(entry.path);
+  if (count === null) return "dir";
+  return count === 1 ? "1 item" : `${count} items`;
+}
+
 function FileBrowserInner({
   sessionId,
   serverName: _serverName,
   onDisconnect: _onDisconnect,
   initialPath,
   onBackRef,
+  viewSettings,
+  folderSettings,
 }: Props) {
   const [path, setPath] = useState(initialPath || "/home");
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -111,6 +165,21 @@ function FileBrowserInner({
   const longPressTriggered = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentPathRef = useRef(path);
+
+  const visibleEntries = useMemo(() => {
+    if (folderSettings.showHiddenFiles) return entries;
+    return entries.filter((e) => !e.name.startsWith("."));
+  }, [entries, folderSettings.showHiddenFiles]);
+
+  const sortedEntries = useMemo(
+    () => sortEntries(visibleEntries, viewSettings.sortBy, folderSettings.foldersFirst),
+    [visibleEntries, viewSettings.sortBy, folderSettings.foldersFirst],
+  );
+
+  // Zoom-derived dimensions
+  const iconSize = Math.round(32 + (viewSettings.zoomLevel / 100) * 24); // 32px – 56px
+  const itemHeight = Math.round(40 + (viewSettings.zoomLevel / 100) * 24); // 40px – 64px
+  const gridCardSize = Math.round(100 + (viewSettings.zoomLevel / 100) * 80); // 100px – 180px
 
   const handleFabToggle = () => setFabOpen(!fabOpen);
 
@@ -176,8 +245,15 @@ function FileBrowserInner({
     }
   };
 
+  const folderSettingsRef = useRef(folderSettings);
+  folderSettingsRef.current = folderSettings;
+
   const loadDir = useCallback(
     async (dirPath: string) => {
+      if (folderSettingsRef.current.rememberLastFolder) {
+        saveLastFolder(dirPath);
+      }
+
       const cached = getDirCached(dirPath);
       if (cached) {
         setEntries(cached);
@@ -185,7 +261,6 @@ function FileBrowserInner({
         setError(null);
         currentPathRef.current = dirPath;
 
-        // Stale-while-revalidate: refresh in the background
         invoke<FileEntry[]>("sftp_list_dir", { sessionId, path: dirPath })
           .then((result) => {
             setDirCached(dirPath, result);
@@ -228,8 +303,7 @@ function FileBrowserInner({
     if (entry.is_dir) {
       await loadDir(entry.path);
     } else if (entry.is_image) {
-      // Collect all image entries for swipe navigation
-      const imageEntries = entries.filter((e) => e.is_image);
+      const imageEntries = sortedEntries.filter((e) => e.is_image);
       const idx = imageEntries.findIndex((e) => e.path === entry.path);
       setImageViewer({ images: imageEntries, index: idx >= 0 ? idx : 0 });
     } else {
@@ -391,21 +465,21 @@ function FileBrowserInner({
   }
 
   // ─── Helpers for rendering entry icons ───────────────────────────────────
-  const renderEntryIcon = (entry: FileEntry) => {
+  const renderEntryIcon = (entry: FileEntry, size = iconSize) => {
     if (entry.is_dir) {
       return (
         <Box
           sx={{
-            width: 40,
-            height: 40,
-            borderRadius: "12px",
+            width: size,
+            height: size,
+            borderRadius: `${Math.round(size * 0.3)}px`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             bgcolor: (theme) => `${theme.palette.warning.main}1a`,
           }}
         >
-          <FolderIcon sx={{ fontSize: 22, color: "warning.main" }} />
+          <FolderIcon sx={{ fontSize: Math.round(size * 0.55), color: "warning.main" }} />
         </Box>
       );
     }
@@ -424,16 +498,16 @@ function FileBrowserInner({
     return (
       <Box
         sx={{
-          width: 40,
-          height: 40,
-          borderRadius: "12px",
+          width: size,
+          height: size,
+          borderRadius: `${Math.round(size * 0.3)}px`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           bgcolor: (theme) => `${theme.palette.info.main}1a`,
         }}
       >
-        <InsertDriveFileIcon sx={{ fontSize: 22, color: "info.main" }} />
+        <InsertDriveFileIcon sx={{ fontSize: Math.round(size * 0.55), color: "info.main" }} />
       </Box>
     );
   };
@@ -525,25 +599,120 @@ function FileBrowserInner({
               This directory is empty
             </Typography>
           </Box>
+        ) : viewSettings.viewMode === "grid" ? (
+          /* ─── Grid view ─────────────────────────────────────────── */
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: `repeat(auto-fill, minmax(${gridCardSize}px, 1fr))`,
+              gap: 1,
+              p: 1.5,
+            }}
+          >
+            {path !== "/" && (
+              <Card
+                variant="outlined"
+                sx={{
+                  borderRadius: 2,
+                  cursor: "pointer",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
+                onClick={handleNavigateUp}
+              >
+                <CardContent
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 0.5,
+                    p: 1.5,
+                    "&:last-child": { pb: 1.5 },
+                  }}
+                >
+                  <FolderOpenIcon sx={{ fontSize: Math.round(gridCardSize * 0.3), color: "warning.main" }} />
+                  <Typography variant="caption" color="text.secondary" noWrap sx={{ width: "100%", textAlign: "center" }}>
+                    ..
+                  </Typography>
+                </CardContent>
+              </Card>
+            )}
+
+            {sortedEntries.map((entry) => (
+              <Card
+                key={entry.path}
+                variant="outlined"
+                sx={{
+                  borderRadius: 2,
+                  cursor: "pointer",
+                  "&:hover": { bgcolor: "action.hover" },
+                }}
+                onClick={() => {
+                  if (entry.is_image) return;
+                  if (longPressTriggered.current) return;
+                  handleEntryClick(entry);
+                }}
+                onMouseDown={(e) => {
+                  if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                }}
+                onMouseUp={clearLongPress}
+                onMouseLeave={clearLongPress}
+                onTouchStart={(e) => {
+                  if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                }}
+                onTouchEnd={clearLongPress}
+                onTouchCancel={clearLongPress}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ entry, anchorEl: e.currentTarget });
+                }}
+              >
+                <CardContent
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 0.5,
+                    p: 1.5,
+                    "&:last-child": { pb: 1.5 },
+                  }}
+                >
+                  {renderEntryIcon(entry, Math.round(gridCardSize * 0.35))}
+                  <Typography
+                    variant="caption"
+                    fontWeight={entry.is_dir ? 600 : 400}
+                    noWrap
+                    sx={{ width: "100%", textAlign: "center" }}
+                  >
+                    {entry.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" fontSize="0.65rem">
+                    {entry.is_dir
+                      ? formatDirLabel(entry, folderSettings.showFoldersSize)
+                      : formatSize(entry.size)}
+                  </Typography>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
         ) : (
+          /* ─── List / Compact view ───────────────────────────────── */
           <List dense disablePadding>
-            {/* Parent directory */}
             {path !== "/" && (
               <ListItem disablePadding>
-                <ListItemButton onClick={handleNavigateUp} sx={{ minHeight: 48 }}>
-                  <ListItemIcon sx={{ minWidth: 52 }}>
+                <ListItemButton onClick={handleNavigateUp} sx={{ minHeight: itemHeight }}>
+                  <ListItemIcon sx={{ minWidth: iconSize + 12 }}>
                     <Box
                       sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "12px",
+                        width: iconSize,
+                        height: iconSize,
+                        borderRadius: `${Math.round(iconSize * 0.3)}px`,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         bgcolor: (theme) => `${theme.palette.warning.main}1a`,
                       }}
                     >
-                      <FolderOpenIcon sx={{ fontSize: 22, color: "warning.main" }} />
+                      <FolderOpenIcon sx={{ fontSize: Math.round(iconSize * 0.55), color: "warning.main" }} />
                     </Box>
                   </ListItemIcon>
                   <ListItemText
@@ -557,12 +726,10 @@ function FileBrowserInner({
               </ListItem>
             )}
 
-            {entries.map((entry) => (
+            {sortedEntries.map((entry) => (
               <ListItem key={entry.path} disablePadding>
                 <ListItemButton
                   onClick={() => {
-                    // Don't fire click if long-press was triggered
-                    // (but for image entries, click is handled inside ImageThumbnail)
                     if (entry.is_image) return;
                     if (longPressTriggered.current) return;
                     handleEntryClick(entry);
@@ -581,15 +748,18 @@ function FileBrowserInner({
                     e.preventDefault();
                     setContextMenu({ entry, anchorEl: e.currentTarget });
                   }}
-                  sx={{ minHeight: 48 }}
+                  sx={{
+                    minHeight: itemHeight,
+                    ...(viewSettings.viewMode === "compact" && { py: 0.25 }),
+                  }}
                 >
-                  <ListItemIcon sx={{ minWidth: 52 }}>
+                  <ListItemIcon sx={{ minWidth: iconSize + 12 }}>
                     {renderEntryIcon(entry)}
                   </ListItemIcon>
                   <ListItemText
                     primary={
                       <Typography
-                        variant="body2"
+                        variant={viewSettings.viewMode === "compact" ? "caption" : "body2"}
                         fontWeight={entry.is_dir ? 600 : 400}
                         noWrap
                       >
@@ -597,25 +767,29 @@ function FileBrowserInner({
                       </Typography>
                     }
                     secondary={
-                      <Stack direction="row" spacing={2} component="span">
-                        <Typography
-                          component="span"
-                          variant="caption"
-                          color="text.secondary"
-                          fontFamily="monospace"
-                        >
-                          {entry.is_dir ? "dir" : formatSize(entry.size)}
-                        </Typography>
-                        {entry.modified && (
+                      viewSettings.viewMode === "compact" ? undefined : (
+                        <Stack direction="row" spacing={2} component="span">
                           <Typography
                             component="span"
                             variant="caption"
                             color="text.secondary"
+                            fontFamily="monospace"
                           >
-                            {new Date(entry.modified).toLocaleDateString()}
+                            {entry.is_dir
+                              ? formatDirLabel(entry, folderSettings.showFoldersSize)
+                              : formatSize(entry.size)}
                           </Typography>
-                        )}
-                      </Stack>
+                          {entry.modified && (
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {new Date(entry.modified).toLocaleDateString()}
+                            </Typography>
+                          )}
+                        </Stack>
+                      )
                     }
                   />
                 </ListItemButton>

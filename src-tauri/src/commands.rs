@@ -326,6 +326,7 @@ pub async fn sftp_get_thumbnail(
     session_id: String,
     path: String,
     max_bytes: Option<usize>,
+    remote_mtime: Option<u64>,
 ) -> AppResult<String> {
     log::debug!("[CMD] sftp_get_thumbnail called — path=\"{}\"", path);
 
@@ -343,6 +344,7 @@ pub async fn sftp_get_thumbnail(
         &path,
         max_bytes.unwrap_or(128 * 1024),
         &thumb_cache_dir,
+        remote_mtime,
     )
     .await
 }

@@ -1,6 +1,63 @@
-import { ServerConfig } from "./types";
+import { ServerConfig, ViewSettings, FolderSettings } from "./types";
 
 const SERVERS_KEY = "vps-file-browser-servers";
+const VIEW_SETTINGS_KEY = "oxidock-view-settings";
+const FOLDER_SETTINGS_KEY = "oxidock-folder-settings";
+const LAST_FOLDER_KEY = "oxidock-last-folder";
+
+const DEFAULT_VIEW_SETTINGS: ViewSettings = {
+  viewMode: "list",
+  sortBy: "name",
+  zoomLevel: 50,
+  onlyThisFolder: false,
+};
+
+export function loadViewSettings(): ViewSettings {
+  try {
+    const raw = localStorage.getItem(VIEW_SETTINGS_KEY);
+    if (!raw) return DEFAULT_VIEW_SETTINGS;
+    return { ...DEFAULT_VIEW_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_VIEW_SETTINGS;
+  }
+}
+
+export function saveViewSettings(settings: ViewSettings): void {
+  localStorage.setItem(VIEW_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+const DEFAULT_FOLDER_SETTINGS: FolderSettings = {
+  showHiddenFiles: true,
+  foldersFirst: true,
+  rememberLastFolder: true,
+  showFoldersSize: false,
+};
+
+export function loadFolderSettings(): FolderSettings {
+  try {
+    const raw = localStorage.getItem(FOLDER_SETTINGS_KEY);
+    if (!raw) return DEFAULT_FOLDER_SETTINGS;
+    return { ...DEFAULT_FOLDER_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_FOLDER_SETTINGS;
+  }
+}
+
+export function saveFolderSettings(settings: FolderSettings): void {
+  localStorage.setItem(FOLDER_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function loadLastFolder(): string | null {
+  try {
+    return localStorage.getItem(LAST_FOLDER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastFolder(path: string): void {
+  localStorage.setItem(LAST_FOLDER_KEY, path);
+}
 
 export function loadServers(): ServerConfig[] {
   try {
