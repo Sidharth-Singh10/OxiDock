@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { readFile } from "@tauri-apps/plugin-fs";
 import {
   Box,
   CircularProgress,
@@ -82,6 +82,23 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
 
   const entry = images[index];
 
+  // ─── Blob URL management ──────────────────────────────────────────────────
+  const blobUrlRef = useRef<string | null>(null);
+
+  const revokeBlobUrl = useCallback(() => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+  }, []);
+
+  /** Read a local cached file and return a blob URL the WebView can display. */
+  const localPathToBlobUrl = useCallback(async (localPath: string, name: string): Promise<string> => {
+    const bytes = await readFile(localPath);
+    const blob = new Blob([bytes], { type: mimeFromName(name) });
+    return URL.createObjectURL(blob);
+  }, []);
+
   // ─── Load image ────────────────────────────────────────────────────────────
   const loadImage = useCallback(
     async (i: number, retry = 0) => {
@@ -91,6 +108,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
       // Reset state on first attempt
       if (retry === 0) {
         setLoadState("loading");
+        revokeBlobUrl();
         setSrc(null);
         setScale(1);
         setTranslate({ x: 0, y: 0 });
@@ -123,7 +141,11 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
           });
           setCached(img.path, localPath);
         }
-        setSrc(convertFileSrc(localPath));
+
+        const blobUrl = await localPathToBlobUrl(localPath, img.name);
+        revokeBlobUrl();
+        blobUrlRef.current = blobUrl;
+        setSrc(blobUrl);
         setLoadState("done");
         setAutoRetrying(false);
 
@@ -151,7 +173,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
           const nextRetry = retry + 1;
           setRetryCount(nextRetry);
           setAutoRetrying(true);
-          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retry); // 500, 1000, 2000
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retry);
           retryTimerRef.current = setTimeout(() => loadImage(i, nextRetry), delay);
         } else {
           setLoadState("error");
@@ -159,15 +181,16 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         }
       }
     },
-    [images, sessionId],
+    [images, sessionId, revokeBlobUrl, localPathToBlobUrl],
   );
 
   useEffect(() => {
     loadImage(index);
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      revokeBlobUrl();
     };
-  }, [index, loadImage]);
+  }, [index, loadImage, revokeBlobUrl]);
 
   // ─── Navigation ───────────────────────────────────────────────────────────
   const goTo = (newIndex: number) => {
@@ -446,6 +469,10 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             onLoad={(e: React.SyntheticEvent<HTMLImageElement>) => {
               const el = e.currentTarget;
               setNaturalDims({ w: el.naturalWidth, h: el.naturalHeight });
+            }}
+            onError={() => {
+              console.error("ImageViewer <img> failed to load src");
+              setLoadState("error");
             }}
             sx={{
               maxWidth: "100%",
