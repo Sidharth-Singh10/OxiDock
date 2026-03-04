@@ -14,9 +14,13 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import BrokenImageIcon from "@mui/icons-material/BrokenImage";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import ZoomInIcon from "@mui/icons-material/ZoomIn";
+import ZoomOutIcon from "@mui/icons-material/ZoomOut";
+import CropFreeIcon from "@mui/icons-material/CropFree";
 
 import type { FileEntry } from "../lib/types";
-import { getCached, isCached, setCached } from "../lib/imageCache";
+import { getCached, isCached, setCached, getThumbnailCached } from "../lib/imageCache";
 
 interface Props {
   sessionId: string;
@@ -27,11 +31,45 @@ interface Props {
 
 type LoadState = "loading" | "done" | "error";
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 500;
+const MIN_SCALE = 1;
+const MAX_SCALE = 6;
+const ZOOM_STEP = 0.5;
+
+/** Derive a data-uri MIME type from a filename extension. */
+function mimeFromName(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "jpeg";
+  if (ext === "svg") return "image/svg+xml";
+  return `image/${ext === "jpg" ? "jpeg" : ext}`;
+}
+
+/** Format byte size to a human-readable string. */
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function ImageViewer({ sessionId, images, initialIndex, onClose }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [src, setSrc] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [snackbar, setSnackbar] = useState<string | null>(null);
+
+  // Progressive loading — blurred thumbnail placeholder
+  const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
+
+  // Retry state
+  const [retryCount, setRetryCount] = useState(0);
+  const [autoRetrying, setAutoRetrying] = useState(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Image intrinsic dimensions (populated via onLoad)
+  const [naturalDims, setNaturalDims] = useState<{ w: number; h: number } | null>(null);
+
+  // Info panel toggle
+  const [showInfo, setShowInfo] = useState(false);
 
   // Zoom & pan state
   const [scale, setScale] = useState(1);
@@ -46,20 +84,34 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
 
   // ─── Load image ────────────────────────────────────────────────────────────
   const loadImage = useCallback(
-    async (i: number) => {
+    async (i: number, retry = 0) => {
       const img = images[i];
       if (!img) return;
-      setLoadState("loading");
-      setSrc(null);
-      setScale(1);
-      setTranslate({ x: 0, y: 0 });
+
+      // Reset state on first attempt
+      if (retry === 0) {
+        setLoadState("loading");
+        setSrc(null);
+        setScale(1);
+        setTranslate({ x: 0, y: 0 });
+        setNaturalDims(null);
+        setRetryCount(0);
+        setAutoRetrying(false);
+
+        // Progressive: immediately show blurred thumbnail if cached
+        const thumbB64 = getThumbnailCached(img.path);
+        if (thumbB64) {
+          setThumbnailSrc(`data:${mimeFromName(img.name)};base64,${thumbB64}`);
+        } else {
+          setThumbnailSrc(null);
+        }
+      }
 
       try {
         let localPath: string;
         if (isCached(img.path)) {
           localPath = getCached(img.path)!;
         } else {
-          // Parse mtime from the ISO string stored in entry.modified
           const remoteMtime = img.modified
             ? Math.floor(new Date(img.modified).getTime() / 1000)
             : undefined;
@@ -73,6 +125,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         }
         setSrc(convertFileSrc(localPath));
         setLoadState("done");
+        setAutoRetrying(false);
 
         // Preload neighbours in background (best-effort)
         const preload = (idx: number) => {
@@ -94,7 +147,16 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         preload(i + 1);
       } catch (e) {
         console.error("ImageViewer load error:", e);
-        setLoadState("error");
+        if (retry < MAX_RETRIES) {
+          const nextRetry = retry + 1;
+          setRetryCount(nextRetry);
+          setAutoRetrying(true);
+          const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retry); // 500, 1000, 2000
+          retryTimerRef.current = setTimeout(() => loadImage(i, nextRetry), delay);
+        } else {
+          setLoadState("error");
+          setAutoRetrying(false);
+        }
       }
     },
     [images, sessionId],
@@ -102,12 +164,30 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
 
   useEffect(() => {
     loadImage(index);
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
   }, [index, loadImage]);
 
   // ─── Navigation ───────────────────────────────────────────────────────────
   const goTo = (newIndex: number) => {
     if (newIndex < 0 || newIndex >= images.length) return;
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     setIndex(newIndex);
+  };
+
+  // ─── Zoom helpers ─────────────────────────────────────────────────────────
+  const zoomIn = () => setScale((s) => Math.min(s + ZOOM_STEP, MAX_SCALE));
+  const zoomOut = () => {
+    setScale((s) => {
+      const next = Math.max(s - ZOOM_STEP, MIN_SCALE);
+      if (next <= 1) setTranslate({ x: 0, y: 0 });
+      return next;
+    });
+  };
+  const zoomReset = () => {
+    setScale(1);
+    setTranslate({ x: 0, y: 0 });
   };
 
   // ─── Open with external app ───────────────────────────────────────────────
@@ -169,7 +249,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
     if (e.touches.length === 2 && touchStartRef.current) {
       const newDist = getTouchDist(e);
       const ratio = newDist / (touchStartRef.current.dist || 1);
-      setScale((prev) => Math.min(Math.max(prev * ratio, 1), 6));
+      setScale((prev) => Math.min(Math.max(prev * ratio, MIN_SCALE), MAX_SCALE));
       touchStartRef.current = { ...touchStartRef.current, dist: newDist };
     } else if (e.touches.length === 1 && panStartRef.current && scale > 1) {
       const dx = e.touches[0].clientX - panStartRef.current.x;
@@ -182,8 +262,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
     const now = Date.now();
     // Double-tap to reset zoom
     if (now - lastTapRef.current < 300 && e.changedTouches.length === 1) {
-      setScale(1);
-      setTranslate({ x: 0, y: 0 });
+      zoomReset();
       lastTapRef.current = 0;
       return;
     }
@@ -212,6 +291,11 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
   }, [index, onClose]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  const zoomPercent = `${Math.round(scale * 100)}%`;
+
+  // File extension for the info panel
+  const fileExt = entry?.name.split(".").pop()?.toUpperCase() ?? "—";
+
   return (
     <Box
       sx={{
@@ -253,6 +337,12 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             {index + 1} / {images.length}
           </Typography>
         </Box>
+        <IconButton
+          onClick={() => setShowInfo((v) => !v)}
+          sx={{ color: showInfo ? "primary.main" : "rgba(255,255,255,0.7)" }}
+        >
+          <InfoOutlinedIcon fontSize="small" />
+        </IconButton>
         <IconButton onClick={handleOpenExternal} sx={{ color: "rgba(255,255,255,0.7)" }}>
           <OpenInNewIcon fontSize="small" />
         </IconButton>
@@ -272,23 +362,45 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {loadState === "loading" && (
+        {/* Progressive: blurred thumbnail placeholder */}
+        {(loadState === "loading" || autoRetrying) && thumbnailSrc && (
+          <Box
+            component="img"
+            src={thumbnailSrc}
+            alt=""
+            sx={{
+              position: "absolute",
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+              filter: "blur(16px)",
+              transform: "scale(1.05)",
+              opacity: 0.7,
+            }}
+          />
+        )}
+
+        {/* Loading / retrying spinner */}
+        {(loadState === "loading" || autoRetrying) && (
           <Box
             sx={{
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               gap: 2,
+              zIndex: 1,
             }}
           >
             <CircularProgress size={44} sx={{ color: "rgba(255,255,255,0.6)" }} />
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.4)" }}>
-              Loading image…
+              {autoRetrying
+                ? `Retrying ${retryCount}/${MAX_RETRIES}…`
+                : "Loading image…"}
             </Typography>
           </Box>
         )}
 
-        {loadState === "error" && (
+        {loadState === "error" && !autoRetrying && (
           <Box
             sx={{
               display: "flex",
@@ -331,6 +443,10 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             src={src}
             alt={entry?.name}
             draggable={false}
+            onLoad={(e: React.SyntheticEvent<HTMLImageElement>) => {
+              const el = e.currentTarget;
+              setNaturalDims({ w: el.naturalWidth, h: el.naturalHeight });
+            }}
             sx={{
               maxWidth: "100%",
               maxHeight: "100%",
@@ -341,6 +457,82 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
               willChange: "transform",
             }}
           />
+        )}
+
+        {/* Info panel — slides in from the right */}
+        {showInfo && loadState === "done" && (
+          <Box
+            sx={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 220,
+              bgcolor: "rgba(0,0,0,0.75)",
+              backdropFilter: "blur(12px)",
+              p: 2,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              borderLeft: "1px solid rgba(255,255,255,0.08)",
+              animation: "slideInRight 0.25s ease-out",
+              "@keyframes slideInRight": {
+                from: { transform: "translateX(100%)" },
+                to: { transform: "translateX(0)" },
+              },
+            }}
+          >
+            <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.4)", letterSpacing: 1.5 }}>
+              Image Info
+            </Typography>
+
+            <Box>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
+                Dimensions
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                {naturalDims ? `${naturalDims.w} × ${naturalDims.h}` : "—"}
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
+                Format
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                {fileExt}
+              </Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
+                File Size
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                {entry?.size ? formatSize(entry.size) : "—"}
+              </Typography>
+            </Box>
+
+            {entry?.modified && (
+              <Box>
+                <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
+                  Modified
+                </Typography>
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                  {new Date(entry.modified).toLocaleDateString()}
+                </Typography>
+              </Box>
+            )}
+
+            <Box>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
+                Zoom
+              </Typography>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                {zoomPercent}
+              </Typography>
+            </Box>
+          </Box>
         )}
 
         {/* Prev / Next chevrons (visible on non-touch or tablet) */}
@@ -363,10 +555,11 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             onClick={() => goTo(index + 1)}
             sx={{
               position: "absolute",
-              right: 8,
+              right: showInfo ? 228 : 8,
               color: "rgba(255,255,255,0.7)",
               bgcolor: "rgba(0,0,0,0.3)",
               "&:hover": { bgcolor: "rgba(0,0,0,0.5)" },
+              transition: "right 0.25s ease",
             }}
           >
             <ChevronRightIcon />
@@ -374,34 +567,98 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         )}
       </Box>
 
-      {/* Bottom dot indicator */}
-      {images.length > 1 && (
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 0.75,
-            pb: "max(12px, env(safe-area-inset-bottom, 12px))",
-            pt: 1.5,
-            flexShrink: 0,
-          }}
-        >
-          {images.map((_, i) => (
-            <Box
-              key={i}
-              onClick={() => goTo(i)}
+      {/* Bottom bar: zoom controls + dot indicator */}
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          pb: "max(8px, env(safe-area-inset-bottom, 8px))",
+          pt: 1,
+          flexShrink: 0,
+          gap: 0.5,
+        }}
+      >
+        {/* Zoom controls */}
+        {loadState === "done" && (
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 3,
+              bgcolor: "rgba(255,255,255,0.08)",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <IconButton
+              size="small"
+              onClick={zoomOut}
+              disabled={scale <= MIN_SCALE}
+              sx={{ color: "rgba(255,255,255,0.7)", "&.Mui-disabled": { color: "rgba(255,255,255,0.2)" } }}
+            >
+              <ZoomOutIcon fontSize="small" />
+            </IconButton>
+            <Typography
+              variant="caption"
               sx={{
-                width: i === index ? 20 : 6,
-                height: 6,
-                borderRadius: 3,
-                bgcolor: i === index ? "primary.main" : "rgba(255,255,255,0.25)",
-                transition: "all 0.25s ease",
-                cursor: "pointer",
+                color: "rgba(255,255,255,0.7)",
+                minWidth: 40,
+                textAlign: "center",
+                fontVariantNumeric: "tabular-nums",
               }}
-            />
-          ))}
-        </Box>
-      )}
+            >
+              {zoomPercent}
+            </Typography>
+            <IconButton
+              size="small"
+              onClick={zoomIn}
+              disabled={scale >= MAX_SCALE}
+              sx={{ color: "rgba(255,255,255,0.7)", "&.Mui-disabled": { color: "rgba(255,255,255,0.2)" } }}
+            >
+              <ZoomInIcon fontSize="small" />
+            </IconButton>
+            {scale !== 1 && (
+              <IconButton
+                size="small"
+                onClick={zoomReset}
+                sx={{ color: "rgba(255,255,255,0.6)" }}
+              >
+                <CropFreeIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Box>
+        )}
+
+        {/* Dot indicator */}
+        {images.length > 1 && (
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 0.75,
+              pt: 0.5,
+            }}
+          >
+            {images.map((_, i) => (
+              <Box
+                key={i}
+                onClick={() => goTo(i)}
+                sx={{
+                  width: i === index ? 20 : 6,
+                  height: 6,
+                  borderRadius: 3,
+                  bgcolor: i === index ? "primary.main" : "rgba(255,255,255,0.25)",
+                  transition: "all 0.25s ease",
+                  cursor: "pointer",
+                }}
+              />
+            ))}
+          </Box>
+        )}
+      </Box>
 
       <Snackbar
         open={!!snackbar}

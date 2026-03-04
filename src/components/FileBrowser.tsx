@@ -647,17 +647,16 @@ function FileBrowserInner({
                   "&:hover": { bgcolor: "action.hover" },
                 }}
                 onClick={() => {
-                  if (entry.is_image) return;
                   if (longPressTriggered.current) return;
                   handleEntryClick(entry);
                 }}
                 onMouseDown={(e) => {
-                  if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                  startLongPress(entry, e.currentTarget);
                 }}
                 onMouseUp={clearLongPress}
                 onMouseLeave={clearLongPress}
                 onTouchStart={(e) => {
-                  if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                  startLongPress(entry, e.currentTarget);
                 }}
                 onTouchEnd={clearLongPress}
                 onTouchCancel={clearLongPress}
@@ -730,17 +729,16 @@ function FileBrowserInner({
               <ListItem key={entry.path} disablePadding>
                 <ListItemButton
                   onClick={() => {
-                    if (entry.is_image) return;
                     if (longPressTriggered.current) return;
                     handleEntryClick(entry);
                   }}
                   onMouseDown={(e) => {
-                    if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                    startLongPress(entry, e.currentTarget);
                   }}
                   onMouseUp={clearLongPress}
                   onMouseLeave={clearLongPress}
                   onTouchStart={(e) => {
-                    if (!entry.is_image) startLongPress(entry, e.currentTarget);
+                    startLongPress(entry, e.currentTarget);
                   }}
                   onTouchEnd={clearLongPress}
                   onTouchCancel={clearLongPress}

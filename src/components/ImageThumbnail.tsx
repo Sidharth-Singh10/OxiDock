@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Box, CircularProgress } from "@mui/material";
 import ImageIcon from "@mui/icons-material/Image";
 import type { FileEntry } from "../lib/types";
 import {
   getThumbnailCached,
-  setThumbnailCached,
   isThumbnailCached,
 } from "../lib/imageCache";
+import { requestThumbnail } from "../lib/thumbnailBatch";
 
 interface Props {
   sessionId: string;
@@ -56,13 +55,8 @@ export default function ImageThumbnail({ sessionId, entry, onClick, onLongPress 
         const remoteMtime = entry.modified
           ? Math.floor(new Date(entry.modified).getTime() / 1000)
           : undefined;
-        invoke<string>("sftp_get_thumbnail", {
-          sessionId,
-          path: entry.path,
-          remoteMtime,
-        })
+        requestThumbnail(sessionId, entry.path, remoteMtime)
           .then((data) => {
-            setThumbnailCached(entry.path, data);
             setB64(data);
             setStatus("done");
           })

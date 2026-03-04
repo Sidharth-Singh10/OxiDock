@@ -5,14 +5,58 @@
  * Two separate caches:
  *  - thumbnailCache  — stores base64 strings from sftp_get_thumbnail (native WebP thumbnails)
  *  - fullImageCache  — stores local file paths from sftp_cache_image (full downloads)
+ *
+ * Both use LRU eviction to prevent unbounded memory growth.
  */
 
 import type { ImageCacheEntry } from "./types";
 import { clearDirCache } from "./dirCache";
 
+// ─── LRU Map ──────────────────────────────────────────────────────────────────
+
+/**
+ * A Map with a maximum capacity that evicts the least-recently-used entry
+ * when a new entry would exceed the limit. `get()` promotes the accessed key
+ * to "most recently used".
+ */
+class LRUMap<K, V> extends Map<K, V> {
+  private maxSize: number;
+
+  constructor(maxSize: number) {
+    super();
+    this.maxSize = maxSize;
+  }
+
+  override get(key: K): V | undefined {
+    if (!super.has(key)) return undefined;
+    // Promote to most-recently-used by re-inserting
+    const value = super.get(key)!;
+    super.delete(key);
+    super.set(key, value);
+    return value;
+  }
+
+  override set(key: K, value: V): this {
+    // If already present, delete first so it moves to the end
+    if (super.has(key)) {
+      super.delete(key);
+    }
+    super.set(key, value);
+    // Evict oldest entries if over capacity
+    while (this.size > this.maxSize) {
+      const oldest = this.keys().next().value;
+      if (oldest !== undefined) {
+        super.delete(oldest);
+      }
+    }
+    return this;
+  }
+}
+
 // ─── Full-image cache (local file paths) ─────────────────────────────────────
 
-const fullImageCache = new Map<string, ImageCacheEntry>();
+const MAX_FULL_IMAGES = 50;
+const fullImageCache = new LRUMap<string, ImageCacheEntry>(MAX_FULL_IMAGES);
 
 /** Returns the local cached file path for a remote path, or null if not cached. */
 export function getCached(remotePath: string): string | null {
@@ -35,7 +79,8 @@ export function isCached(remotePath: string): boolean {
 
 // ─── Thumbnail cache (base64 strings) ────────────────────────────────────────
 
-const thumbnailCache = new Map<string, string>();
+const MAX_THUMBNAILS = 200;
+const thumbnailCache = new LRUMap<string, string>(MAX_THUMBNAILS);
 
 /**
  * Returns the cached base64 thumbnail string for a remote path, or null.

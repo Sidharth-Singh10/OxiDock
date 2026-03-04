@@ -50,21 +50,34 @@ export function clearDirCache(): void {
 
 function prefetchThumbnails(entries: FileEntry[], sessionId: string): void {
   const images = entries
-    .filter((e) => e.is_image)
+    .filter((e) => e.is_image && !isThumbnailCached(e.path) && !inflightThumbs.has(e.path))
     .slice(0, MAX_PREFETCH_THUMBS_PER_DIR);
 
-  for (const img of images) {
-    if (isThumbnailCached(img.path) || inflightThumbs.has(img.path)) continue;
-    inflightThumbs.add(img.path);
+  if (images.length === 0) return;
 
-    const remoteMtime = img.modified
-      ? Math.floor(new Date(img.modified).getTime() / 1000)
-      : undefined;
-    invoke<string>("sftp_get_thumbnail", { sessionId, path: img.path, remoteMtime })
-      .then((b64) => setThumbnailCached(img.path, b64))
-      .catch(() => {})
-      .finally(() => inflightThumbs.delete(img.path));
-  }
+  const requests = images.map((img) => {
+    inflightThumbs.add(img.path);
+    return {
+      path: img.path,
+      remote_mtime: img.modified
+        ? Math.floor(new Date(img.modified).getTime() / 1000)
+        : undefined,
+    };
+  });
+
+  invoke<Record<string, string>>("sftp_get_thumbnails_batch", {
+    sessionId,
+    requests,
+  })
+    .then((results) => {
+      for (const [path, b64] of Object.entries(results)) {
+        setThumbnailCached(path, b64);
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      for (const img of images) inflightThumbs.delete(img.path);
+    });
 }
 
 /**
