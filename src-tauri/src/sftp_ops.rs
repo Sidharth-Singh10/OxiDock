@@ -262,7 +262,7 @@ pub async fn get_thumbnail(
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
-    let mut file = sftp
+    let  file = sftp
         .open(path)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to open image for thumbnail: {e}")))?;
@@ -276,7 +276,6 @@ pub async fn get_thumbnail(
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to read thumbnail bytes: {e}")))?;
 
-    let read_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     // Spawn blocking task for CPU-intensive image processing
     let (b64, webp_data) = tokio::task::spawn_blocking(move || {

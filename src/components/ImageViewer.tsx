@@ -9,7 +9,7 @@ import {
   Snackbar,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import BrokenImageIcon from "@mui/icons-material/BrokenImage";
@@ -213,28 +213,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
     setTranslate({ x: 0, y: 0 });
   };
 
-  // ─── Open with external app ───────────────────────────────────────────────
-  const handleOpenExternal = async () => {
-    try {
-      let localPath: string;
-      if (isCached(entry.path)) {
-        localPath = getCached(entry.path)!;
-      } else {
-        const mtime = entry.modified
-          ? Math.floor(new Date(entry.modified).getTime() / 1000)
-          : undefined;
-        localPath = await invoke<string>("sftp_cache_image", {
-          sessionId,
-          path: entry.path,
-          remoteMtime: mtime,
-        });
-        setCached(entry.path, localPath);
-      }
-      await invoke("open_file_externally", { path: localPath });
-    } catch (e) {
-      setSnackbar(`Failed to open externally: ${e}`);
-    }
-  };
+
 
   // ─── Touch gestures (pinch-zoom, pan, swipe) ──────────────────────────────
   const getTouchDist = (e: React.TouchEvent) => {
@@ -366,9 +345,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         >
           <InfoOutlinedIcon fontSize="small" />
         </IconButton>
-        <IconButton onClick={handleOpenExternal} sx={{ color: "rgba(255,255,255,0.7)" }}>
-          <OpenInNewIcon fontSize="small" />
-        </IconButton>
+
       </Box>
 
       {/* Image area */}

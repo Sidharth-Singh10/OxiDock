@@ -382,10 +382,56 @@ pub async fn sftp_cache_image(
 }
 
 #[tauri::command]
-pub async fn open_file_externally(path: String) -> AppResult<()> {
+pub async fn open_file_externally(app: tauri::AppHandle, path: String) -> AppResult<()> {
     log::info!("[CMD] open_file_externally — path=\"{}\"", path);
-    tauri_plugin_opener::open_path(path, None::<&str>)
-        .map_err(|e| AppError::Sftp(format!("Failed to open file externally: {e}")))
+
+    // On Android, `open_path` is unsupported. We need to:
+    // 1. Copy the file from the app's private cache to shared storage so
+    //    external apps can access it.
+    // 2. Use `open_url` with a file:// URI instead of `open_path`.
+    #[cfg(target_os = "android")]
+    {
+        let cache_dir = app
+            .path()
+            .app_cache_dir()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let open_path = if path.starts_with(&cache_dir) {
+            let share_dir = std::path::PathBuf::from("/storage/emulated/0/Download/OxiDock");
+            std::fs::create_dir_all(&share_dir)
+                .map_err(|e| AppError::Sftp(format!("Cannot create share dir: {e}")))?;
+
+            let file_name = std::path::Path::new(&path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let dest = share_dir.join(&file_name);
+            std::fs::copy(&path, &dest)
+                .map_err(|e| AppError::Sftp(format!("Failed to copy to shared storage: {e}")))?;
+
+            log::info!("[CMD] Copied to shared storage: \"{}\"", dest.display());
+            dest.to_string_lossy().to_string()
+        } else {
+            path
+        };
+
+        let file_url = format!("file://{}", open_path);
+        log::info!("[CMD] Opening via open_url: \"{}\"", file_url);
+        tauri_plugin_opener::open_url(&file_url, None::<&str>)
+            .map_err(|e| AppError::Sftp(format!("Failed to open file externally: {e}")))?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = &app;
+        tauri_plugin_opener::open_path(path, None::<&str>)
+            .map_err(|e| AppError::Sftp(format!("Failed to open file externally: {e}")))?;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -414,10 +460,7 @@ pub async fn sftp_get_thumbnails_batch(
     requests: Vec<ThumbnailRequest>,
 ) -> AppResult<std::collections::HashMap<String, String>> {
     let count = requests.len();
-    log::debug!(
-        "[CMD] sftp_get_thumbnails_batch called — {} paths",
-        count,
-    );
+    log::debug!("[CMD] sftp_get_thumbnails_batch called — {} paths", count,);
     let start = std::time::Instant::now();
 
     let cache_dir = app
@@ -435,14 +478,8 @@ pub async fn sftp_get_thumbnails_batch(
         let sess = session.clone();
         let dir = thumb_cache_dir.clone();
         handles.push(tokio::spawn(async move {
-            let result = sftp_ops::get_thumbnail(
-                &sess,
-                &req.path,
-                128 * 1024,
-                &dir,
-                req.remote_mtime,
-            )
-            .await;
+            let result =
+                sftp_ops::get_thumbnail(&sess, &req.path, 128 * 1024, &dir, req.remote_mtime).await;
             (req.path, result)
         }));
     }
@@ -454,7 +491,11 @@ pub async fn sftp_get_thumbnails_batch(
                 results.insert(path, b64);
             }
             Ok((path, Err(e))) => {
-                log::warn!("[CMD] sftp_get_thumbnails_batch — failed for \"{}\": {}", path, e);
+                log::warn!(
+                    "[CMD] sftp_get_thumbnails_batch — failed for \"{}\": {}",
+                    path,
+                    e
+                );
             }
             Err(e) => {
                 log::warn!("[CMD] sftp_get_thumbnails_batch — task panicked: {}", e);

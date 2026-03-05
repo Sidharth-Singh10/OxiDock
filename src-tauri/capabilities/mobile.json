@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Mobile-only capabilities",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": [
+    "biometric:default",
+    "mobile-onbackpressed-listener:allow-register-back-event",
+    "mobile-onbackpressed-listener:allow-registerListener"
+  ]
+}

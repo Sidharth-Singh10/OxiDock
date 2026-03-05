@@ -31,7 +31,7 @@ import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import AddIcon from "@mui/icons-material/Add";
 import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
 import FileUploadIcon from "@mui/icons-material/FileUpload";
-import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+
 import DeleteIcon from "@mui/icons-material/Delete";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 
@@ -344,27 +344,7 @@ function FileBrowserInner({
     handleEntryClick(entry);
   };
 
-  const handleOpenWithFromMenu = async () => {
-    if (!contextMenu) return;
-    const entry = contextMenu.entry;
-    setContextMenu(null);
-    try {
-      setDownloading(true);
-      const mtime = entry.modified
-        ? Math.floor(new Date(entry.modified).getTime() / 1000)
-        : undefined;
-      const localPath = await invoke<string>("sftp_cache_image", {
-        sessionId,
-        path: entry.path,
-        remoteMtime: mtime,
-      });
-      await invoke("open_file_externally", { path: localPath });
-    } catch (err) {
-      setSnackbar(`Failed to open externally: ${err}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
+
 
   const handleDownloadFromMenu = async () => {
     if (!contextMenu) return;
@@ -812,12 +792,7 @@ function FileBrowserInner({
           <PlayArrowIcon fontSize="small" sx={{ mr: 1.5, color: "primary.main" }} />
           Open
         </MenuItem>
-        {contextMenu?.entry.is_image && (
-          <MenuItem onClick={handleOpenWithFromMenu} disabled={downloading}>
-            <OpenInNewIcon fontSize="small" sx={{ mr: 1.5, color: "info.main" }} />
-            Open with another app
-          </MenuItem>
-        )}
+
         <MenuItem onClick={handleDownloadFromMenu} disabled={downloading}>
           <DownloadIcon fontSize="small" sx={{ mr: 1.5, color: "success.main" }} />
           {downloading ? "Downloading…" : "Download"}

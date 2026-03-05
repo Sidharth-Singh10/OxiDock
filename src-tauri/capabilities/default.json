@@ -6,13 +6,10 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "biometric:default",
     "dialog:default",
     "fs:allow-read-file",
     "fs:read-files",
     "fs:scope-appcache-recursive",
-    "process:default",
-    "mobile-onbackpressed-listener:allow-register-back-event",
-    "mobile-onbackpressed-listener:allow-registerListener"
+    "process:default"
   ]
 }
