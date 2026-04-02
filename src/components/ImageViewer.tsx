@@ -20,7 +20,7 @@ import ZoomOutIcon from "@mui/icons-material/ZoomOut";
 import CropFreeIcon from "@mui/icons-material/CropFree";
 
 import type { FileEntry } from "../lib/types";
-import { getCached, isCached, setCached, getThumbnailCached } from "../lib/imageCache";
+import { getCached, isCached, setCached } from "../lib/imageCache";
 
 interface Props {
   sessionId: string;
@@ -56,9 +56,6 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
   const [src, setSrc] = useState<string | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [snackbar, setSnackbar] = useState<string | null>(null);
-
-  // Progressive loading — blurred thumbnail placeholder
-  const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
 
   // Retry state
   const [retryCount, setRetryCount] = useState(0);
@@ -115,14 +112,6 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         setNaturalDims(null);
         setRetryCount(0);
         setAutoRetrying(false);
-
-        // Progressive: immediately show blurred thumbnail if cached
-        const thumbB64 = getThumbnailCached(img.path);
-        if (thumbB64) {
-          setThumbnailSrc(`data:${mimeFromName(img.name)};base64,${thumbB64}`);
-        } else {
-          setThumbnailSrc(null);
-        }
       }
 
       try {
@@ -362,24 +351,6 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Progressive: blurred thumbnail placeholder */}
-        {(loadState === "loading" || autoRetrying) && thumbnailSrc && (
-          <Box
-            component="img"
-            src={thumbnailSrc}
-            alt=""
-            sx={{
-              position: "absolute",
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              filter: "blur(16px)",
-              transform: "scale(1.05)",
-              opacity: 0.7,
-            }}
-          />
-        )}
-
         {/* Loading / retrying spinner */}
         {(loadState === "loading" || autoRetrying) && (
           <Box

@@ -12,7 +12,7 @@ Tauri (Rust) layer
   ├─ key_store.rs     — SSH key vault (JSON file, base64-encoded)
   ├─ ssh_manager.rs   — SSH session manager (russh 0.57, async, session pooling)
   ├─ sftp_ops.rs      — SFTP operations (list, preview, download, upload, delete,
-  │                      thumbnail generation, image caching)
+  │                      image caching)
   ├─ commands.rs      — Tauri command wrappers exposed to JS
   └─ errors.rs        — Unified error types
 ```
@@ -43,9 +43,7 @@ Tauri (Rust) layer
 - **File & Directory Deletion**: Delete files or recursively delete entire directories.
 
 ### Image Handling
-- **Thumbnail Generation**: Server-side thumbnail generation using `image` + `fast_image_resize`, encoded as WebP and returned as base64. Batch thumbnail requests run in parallel via Tokio tasks.
-- **Thumbnail Caching**: Disk-based thumbnail cache (~50 MB) with mtime-based freshness checks and LRU-style eviction.
-- **Image Viewer**: Full-screen image viewer with progressive loading (thumbnail → full resolution), pan/zoom gestures, and swipe navigation. Full images cached locally (~200 MB) and read via the Tauri FS plugin.
+- **Image Viewer**: Full-screen image viewer with pan/zoom gestures and swipe navigation. Full images cached locally (~200 MB) and read via the Tauri FS plugin.
 
 ### UI & Theming
 - **Theme System**: Multiple built-in themes — Tokyo Night and Catppuccin variants — selectable from a theme picker in the navigation drawer.
@@ -120,14 +118,12 @@ OxiDock/
 │   │   ├── KeyManager.tsx            # SSH key management UI
 │   │   ├── FilePreview.tsx           # Text/binary file preview + download
 │   │   ├── ImageViewer.tsx           # Full-screen image viewer (pan/zoom/swipe)
-│   │   ├── ImageThumbnail.tsx        # Lazy-loaded thumbnail component
 │   │   ├── ViewOptionsPopover.tsx    # View mode, sort, and zoom controls
 │   │   └── FolderOptionsPopover.tsx  # Hidden files, folders-first, path memory
 │   ├── lib/
 │   │   ├── types.ts                  # TypeScript interfaces
 │   │   ├── storage.ts                # localStorage helpers (servers, preferences)
 │   │   ├── dirCache.ts               # In-memory directory cache + prefetch
-│   │   ├── thumbnailBatch.ts         # Debounced batch thumbnail requests
 │   │   ├── imageCache.ts             # Full-image cache helpers
 │   │   └── useBiometric.ts           # Biometric auth hook (mobile)
 │   ├── theme/
@@ -145,7 +141,7 @@ OxiDock/
 │   │   ├── commands.rs               # Tauri command handlers
 │   │   ├── key_store.rs              # SSH key vault (JSON, base64)
 │   │   ├── ssh_manager.rs            # SSH session manager (russh)
-│   │   ├── sftp_ops.rs               # SFTP ops + thumbnail/image pipeline
+│   │   ├── sftp_ops.rs               # SFTP ops + image caching pipeline
 │   │   └── errors.rs                 # Error types
 │   ├── capabilities/
 │   │   ├── default.json              # Desktop capabilities (core, opener, dialog, fs, process)

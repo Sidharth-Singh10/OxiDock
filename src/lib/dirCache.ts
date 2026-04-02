@@ -2,9 +2,7 @@
  * In-memory directory listing cache with background prefetch.
  *
  * When a directory is loaded, its child subdirectories are prefetched in
- * parallel (fire-and-forget) so that drilling down feels instant.  Image
- * thumbnails inside those child directories are also warmed into the
- * thumbnail cache from imageCache.ts.
+ * parallel (fire-and-forget) so that drilling down feels instant.
  *
  * All prefetch work is non-blocking — errors are silently swallowed and
  * the UI is never held up.
@@ -12,14 +10,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { FileEntry } from "./types";
-import { isThumbnailCached, setThumbnailCached } from "./imageCache";
-
 const dirCache = new Map<string, FileEntry[]>();
 const inflightDirs = new Set<string>();
-const inflightThumbs = new Set<string>();
 
 const MAX_PREFETCH_DIRS = 20;
-const MAX_PREFETCH_THUMBS_PER_DIR = 8;
 
 // ─── Cache accessors ──────────────────────────────────────────────────────────
 
@@ -43,48 +37,14 @@ export function invalidateDirCache(path: string): void {
 export function clearDirCache(): void {
   dirCache.clear();
   inflightDirs.clear();
-  inflightThumbs.clear();
 }
 
 // ─── Prefetch logic ───────────────────────────────────────────────────────────
 
-function prefetchThumbnails(entries: FileEntry[], sessionId: string): void {
-  const images = entries
-    .filter((e) => e.is_image && !isThumbnailCached(e.path) && !inflightThumbs.has(e.path))
-    .slice(0, MAX_PREFETCH_THUMBS_PER_DIR);
-
-  if (images.length === 0) return;
-
-  const requests = images.map((img) => {
-    inflightThumbs.add(img.path);
-    return {
-      path: img.path,
-      remote_mtime: img.modified
-        ? Math.floor(new Date(img.modified).getTime() / 1000)
-        : undefined,
-    };
-  });
-
-  invoke<Record<string, string>>("sftp_get_thumbnails_batch", {
-    sessionId,
-    requests,
-  })
-    .then((results) => {
-      for (const [path, b64] of Object.entries(results)) {
-        setThumbnailCached(path, b64);
-      }
-    })
-    .catch(() => {})
-    .finally(() => {
-      for (const img of images) inflightThumbs.delete(img.path);
-    });
-}
-
 /**
- * Fire-and-forget prefetch of child directory listings and their image
- * thumbnails.  Call this after a successful `list_dir` with the returned
- * entries — it will kick off parallel SFTP requests for each subdirectory
- * without blocking the caller.
+ * Fire-and-forget prefetch of child directory listings.  Call this after a
+ * successful `list_dir` with the returned entries — it will kick off parallel
+ * SFTP requests for each subdirectory without blocking the caller.
  */
 export function prefetchChildren(entries: FileEntry[], sessionId: string): void {
   const dirs = entries.filter((e) => e.is_dir).slice(0, MAX_PREFETCH_DIRS);
@@ -96,7 +56,6 @@ export function prefetchChildren(entries: FileEntry[], sessionId: string): void 
     invoke<FileEntry[]>("sftp_list_dir", { sessionId, path: dir.path })
       .then((childEntries) => {
         setDirCached(dir.path, childEntries);
-        prefetchThumbnails(childEntries, sessionId);
       })
       .catch(() => {})
       .finally(() => inflightDirs.delete(dir.path));

@@ -7,11 +7,8 @@ use tokio::io::AsyncWriteExt;
 use crate::errors::{AppError, AppResult};
 use crate::ssh_manager::SshSession;
 
-static THUMB_EVICTION_RUNNING: AtomicBool = AtomicBool::new(false);
 static IMAGE_EVICTION_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// 50 MB cap for the thumbnail disk cache.
-const THUMB_CACHE_MAX_BYTES: u64 = 50 * 1024 * 1024;
 /// 200 MB cap for the full-image disk cache.
 const IMAGE_CACHE_MAX_BYTES: u64 = 200 * 1024 * 1024;
 
@@ -208,181 +205,6 @@ pub async fn read_file_preview(
     }
 }
 
-/// Fetch a small slice of an image for thumbnail display.
-/// Downloads up to 10MB of the file and uses libvips to decode and generate
-/// a fast WebP thumbnail natively, returning a base64 string.
-pub async fn get_thumbnail(
-    session: &Arc<SshSession>,
-    path: &str,
-    _max_bytes: usize, // Ignored, we cap at 10MB now.
-    cache_dir: &std::path::Path,
-    remote_mtime: Option<u64>,
-) -> AppResult<String> {
-    use tokio::io::AsyncReadExt;
-
-    // Build a stable cache filename
-    let safe_key = base64::Engine::encode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        path.as_bytes(),
-    );
-    let cache_file = cache_dir.join(format!("{safe_key}_thumb.webp"));
-
-    // Mtime-based freshness: reuse cached thumbnail only if it was written
-    // after the remote file was last modified.
-    if cache_file.exists() {
-        let fresh = if let Some(remote_mt) = remote_mtime {
-            std::fs::metadata(&cache_file)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() >= remote_mt)
-                .unwrap_or(false)
-        } else {
-            true // no mtime info — trust existing cache
-        };
-
-        if fresh {
-            if let Ok(data) = tokio::fs::read(&cache_file).await {
-                let b64 =
-                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
-                log::info!(
-                    "[CACHE] thumbnail cache hit for \"{}\" — skipping download",
-                    path
-                );
-                return Ok(b64);
-            }
-        } else {
-            log::info!(
-                "[CACHE] thumbnail stale for \"{}\" — remote mtime is newer, regenerating",
-                path
-            );
-        }
-    }
-
-    let start = std::time::Instant::now();
-    let sftp = session.sftp().await?;
-
-    let  file = sftp
-        .open(path)
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to open image for thumbnail: {e}")))?;
-
-    // Download up to 10MB
-    let limit: u64 = 10 * 1024 * 1024;
-    let mut buf = Vec::new();
-    let n = file
-        .take(limit)
-        .read_to_end(&mut buf)
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to read thumbnail bytes: {e}")))?;
-
-
-    // Spawn blocking task for CPU-intensive image processing
-    let (b64, webp_data) = tokio::task::spawn_blocking(move || {
-        let process_start = std::time::Instant::now();
-
-        // 1. Decode image from raw bytes
-        let img = image::load_from_memory(&buf)
-            .map_err(|e| AppError::Sftp(format!("Image decode failed: {e}")))?;
-
-        // 2. Setup fast_image_resize Source image
-        let width = img.width().max(1);
-        let height = img.height().max(1);
-        let src_image = fast_image_resize::images::Image::from_vec_u8(
-            width,
-            height,
-            img.to_rgba8().into_raw(),
-            fast_image_resize::PixelType::U8x4,
-        )
-        .map_err(|e| AppError::Sftp(format!("Failed to create fir source image: {e}")))?;
-
-        // 3. Setup fast_image_resize Destination image (256x256 max bounds, maintaining aspect ratio)
-        let aspect_ratio = img.width() as f32 / img.height() as f32;
-        let (dst_width, dst_height) = if aspect_ratio > 1.0 {
-            (256, (256.0 / aspect_ratio).round() as u32)
-        } else {
-            ((256.0 * aspect_ratio).round() as u32, 256)
-        };
-        let dst_width = dst_width.max(1);
-        let dst_height = dst_height.max(1);
-
-        let mut dst_image = fast_image_resize::images::Image::new(
-            dst_width,
-            dst_height,
-            fast_image_resize::PixelType::U8x4,
-        );
-
-        // 4. Resize using Bilinear filter for speed
-        let mut resizer = fast_image_resize::Resizer::new();
-        resizer
-            .resize(
-                &src_image,
-                &mut dst_image,
-                &fast_image_resize::ResizeOptions::new().resize_alg(
-                    fast_image_resize::ResizeAlg::Convolution(
-                        fast_image_resize::FilterType::Bilinear,
-                    ),
-                ),
-            )
-            .map_err(|e| AppError::Sftp(format!("Image resize failed: {e}")))?;
-
-        // 5. Convert back to image crate types and encode WebP
-        let resized_img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-            dst_width,
-            dst_height,
-            dst_image.into_vec(),
-        )
-        .ok_or_else(|| AppError::Sftp("Failed to convert resized buffer".into()))?;
-
-        let dynamic_img = image::DynamicImage::ImageRgba8(resized_img);
-        let mut webp_buf = std::io::Cursor::new(Vec::new());
-        // Using `write_to` with standard WebP format (which we enabled in Cargo.toml via webp feature)
-        dynamic_img
-            .write_to(&mut webp_buf, image::ImageFormat::WebP)
-            .map_err(|e| AppError::Sftp(format!("WebP encoding failed: {e}")))?;
-
-        let webp_data = webp_buf.into_inner();
-        let b64_str =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &webp_data);
-
-        log::info!(
-            "[PERF] fast_image_resize processing — {:.2}ms",
-            process_start.elapsed().as_secs_f64() * 1000.0
-        );
-
-        Ok::<_, AppError>((b64_str, webp_data))
-    })
-    .await
-    .map_err(|e| AppError::Sftp(format!("Thumbnail task panicked: {e}")))?
-    .map_err(|e| {
-        log::error!("[CMD] sftp_get_thumbnail Error \"{}\": {}", path, e);
-        e
-    })?;
-
-    log::info!(
-        "[PERF] get_thumbnail \"{}\" — total: {:.2}ms | bytes_read: {} (up to 10MB)",
-        path,
-        start.elapsed().as_secs_f64() * 1000.0,
-        n,
-    );
-
-    // Write to cache in the background (we can just await it since it's tiny)
-    if let Err(e) = tokio::fs::write(&cache_file, &webp_data).await {
-        log::warn!("Failed to save thumbnail to cache: {}", e);
-    }
-
-    // Background LRU eviction — keep thumbnail dir under THUMB_CACHE_MAX_BYTES
-    if !THUMB_EVICTION_RUNNING.swap(true, Ordering::Relaxed) {
-        let dir = cache_dir.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            evict_cache_lru(&dir, THUMB_CACHE_MAX_BYTES);
-            THUMB_EVICTION_RUNNING.store(false, Ordering::Relaxed);
-        });
-    }
-
-    Ok(b64)
-}
-
 /// Download a full image to the local cache dir and return the cached path.
 /// Uses mtime-based freshness: skips download if the cached file's mtime matches the remote.
 pub async fn cache_image(
@@ -452,18 +274,53 @@ pub async fn cache_image(
     Ok(cache_file.to_string_lossy().to_string())
 }
 
-/// Delete a remote file via SFTP.
-pub async fn delete_file(session: &Arc<SshSession>, path: &str) -> AppResult<()> {
+/// Delete a remote file or directory via SFTP.
+/// When `is_dir` is true, recursively removes all contents before removing the directory itself.
+pub async fn delete_entry(session: &Arc<SshSession>, path: &str, is_dir: bool) -> AppResult<()> {
     let start = std::time::Instant::now();
+
+    if is_dir {
+        delete_dir_recursive(session, path).await?;
+        log::info!(
+            "[PERF] delete_dir (recursive) \"{}\" — {:.2}ms",
+            path,
+            start.elapsed().as_secs_f64() * 1000.0,
+        );
+    } else {
+        let sftp = session.sftp().await?;
+        sftp.remove_file(path)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to delete file: {e}")))?;
+        log::info!(
+            "[PERF] delete_file \"{}\" — {:.2}ms",
+            path,
+            start.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
+
+    Ok(())
+}
+
+/// Recursively delete a directory and all its contents.
+async fn delete_dir_recursive(session: &Arc<SshSession>, dir_path: &str) -> AppResult<()> {
+    let entries = list_dir(session, dir_path).await?;
+
+    for entry in &entries {
+        if entry.is_dir {
+            Box::pin(delete_dir_recursive(session, &entry.path)).await?;
+        } else {
+            let sftp = session.sftp().await?;
+            sftp.remove_file(&entry.path)
+                .await
+                .map_err(|e| AppError::Sftp(format!("Failed to delete \"{}\": {e}", entry.path)))?;
+        }
+    }
+
     let sftp = session.sftp().await?;
-    sftp.remove_file(path)
+    sftp.remove_dir(dir_path)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to delete file: {e}")))?;
-    log::info!(
-        "[PERF] delete_file \"{}\" — {:.2}ms",
-        path,
-        start.elapsed().as_secs_f64() * 1000.0,
-    );
+        .map_err(|e| AppError::Sftp(format!("Failed to remove directory \"{dir_path}\": {e}")))?;
+
     Ok(())
 }
 

@@ -320,36 +320,6 @@ pub async fn sftp_upload_file(
 }
 
 #[tauri::command]
-pub async fn sftp_get_thumbnail(
-    app: tauri::AppHandle,
-    session_mgr: State<'_, Arc<SshSessionManager>>,
-    session_id: String,
-    path: String,
-    max_bytes: Option<usize>,
-    remote_mtime: Option<u64>,
-) -> AppResult<String> {
-    log::debug!("[CMD] sftp_get_thumbnail called — path=\"{}\"", path);
-
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| AppError::Sftp(format!("Cannot determine cache dir: {e}")))?;
-    let thumb_cache_dir = cache_dir.join("thumbnails");
-    std::fs::create_dir_all(&thumb_cache_dir)
-        .map_err(|e| AppError::Sftp(format!("Cannot create thumbnail cache dir: {e}")))?;
-
-    let session = session_mgr.get_session(&session_id).await?;
-    sftp_ops::get_thumbnail(
-        &session,
-        &path,
-        max_bytes.unwrap_or(128 * 1024),
-        &thumb_cache_dir,
-        remote_mtime,
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn sftp_cache_image(
     app: tauri::AppHandle,
     session_mgr: State<'_, Arc<SshSessionManager>>,
@@ -439,11 +409,17 @@ pub async fn sftp_delete_file(
     session_mgr: State<'_, Arc<SshSessionManager>>,
     session_id: String,
     path: String,
+    is_dir: Option<bool>,
 ) -> AppResult<()> {
-    log::debug!("[CMD] sftp_delete_file called — path=\"{}\"", path);
+    let is_dir = is_dir.unwrap_or(false);
+    log::debug!(
+        "[CMD] sftp_delete_file called — path=\"{}\" is_dir={}",
+        path,
+        is_dir,
+    );
     let start = std::time::Instant::now();
     let session = session_mgr.get_session(&session_id).await?;
-    let result = sftp_ops::delete_file(&session, &path).await;
+    let result = sftp_ops::delete_entry(&session, &path, is_dir).await;
     log::info!(
         "[CMD] sftp_delete_file \"{}\" — total_cmd: {:.2}ms",
         path,
@@ -452,74 +428,7 @@ pub async fn sftp_delete_file(
     result
 }
 
-#[tauri::command]
-pub async fn sftp_get_thumbnails_batch(
-    app: tauri::AppHandle,
-    session_mgr: State<'_, Arc<SshSessionManager>>,
-    session_id: String,
-    requests: Vec<ThumbnailRequest>,
-) -> AppResult<std::collections::HashMap<String, String>> {
-    let count = requests.len();
-    log::debug!("[CMD] sftp_get_thumbnails_batch called — {} paths", count,);
-    let start = std::time::Instant::now();
-
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| AppError::Sftp(format!("Cannot determine cache dir: {e}")))?;
-    let thumb_cache_dir = cache_dir.join("thumbnails");
-    std::fs::create_dir_all(&thumb_cache_dir)
-        .map_err(|e| AppError::Sftp(format!("Cannot create thumbnail cache dir: {e}")))?;
-
-    let session = session_mgr.get_session(&session_id).await?;
-
-    let mut handles = Vec::with_capacity(count);
-    for req in requests {
-        let sess = session.clone();
-        let dir = thumb_cache_dir.clone();
-        handles.push(tokio::spawn(async move {
-            let result =
-                sftp_ops::get_thumbnail(&sess, &req.path, 128 * 1024, &dir, req.remote_mtime).await;
-            (req.path, result)
-        }));
-    }
-
-    let mut results = std::collections::HashMap::with_capacity(count);
-    for handle in handles {
-        match handle.await {
-            Ok((path, Ok(b64))) => {
-                results.insert(path, b64);
-            }
-            Ok((path, Err(e))) => {
-                log::warn!(
-                    "[CMD] sftp_get_thumbnails_batch — failed for \"{}\": {}",
-                    path,
-                    e
-                );
-            }
-            Err(e) => {
-                log::warn!("[CMD] sftp_get_thumbnails_batch — task panicked: {}", e);
-            }
-        }
-    }
-
-    log::info!(
-        "[CMD] sftp_get_thumbnails_batch — {}/{} succeeded in {:.2}ms",
-        results.len(),
-        count,
-        start.elapsed().as_secs_f64() * 1000.0,
-    );
-
-    Ok(results)
-}
-
 // ─── Helper types ─────────────────────────────────────────────────────
-
-#[derive(serde::Deserialize)]
-pub struct ThumbnailRequest {
-    pub path: String,
-    pub remote_mtime: Option<u64>,
-}
 
 #[derive(serde::Serialize)]
 pub struct SessionInfo {

@@ -38,8 +38,8 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type { FileEntry, FilePreview as FilePreviewType, ViewSettings, FolderSettings } from "../lib/types";
 import { getDirCached, getDirCachedCount, setDirCached, invalidateDirCache, prefetchChildren } from "../lib/dirCache";
 import { saveLastFolder } from "../lib/storage";
+import ImageIcon from "@mui/icons-material/Image";
 import FilePreview from "./FilePreview";
-import ImageThumbnail from "./ImageThumbnail";
 import ImageViewer from "./ImageViewer";
 
 export interface FileBrowserBackHandle {
@@ -135,6 +135,7 @@ function FileBrowserInner({
     data: FilePreviewType;
     name: string;
   } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -307,6 +308,7 @@ function FileBrowserInner({
       const idx = imageEntries.findIndex((e) => e.path === entry.path);
       setImageViewer({ images: imageEntries, index: idx >= 0 ? idx : 0 });
     } else {
+      setPreviewLoading(entry.name);
       try {
         const data = await invoke<FilePreviewType>("sftp_read_file_preview", {
           sessionId,
@@ -316,6 +318,8 @@ function FileBrowserInner({
         setPreview({ data, name: entry.name });
       } catch (e) {
         setError(`Failed to preview: ${e}`);
+      } finally {
+        setPreviewLoading(null);
       }
     }
   };
@@ -378,6 +382,7 @@ function FileBrowserInner({
       await invoke("sftp_delete_file", {
         sessionId,
         path: deleteTarget.path,
+        isDir: deleteTarget.is_dir,
       });
       setSnackbar(`Deleted ${deleteTarget.name}`);
       setDeleteTarget(null);
@@ -405,9 +410,10 @@ function FileBrowserInner({
   useImperativeHandle(
     onBackRef,
     () => ({
-      canGoBack: () => !!imageViewer || !!preview || (!atMountPoint && pathParts.length > 1),
+      canGoBack: () => !!imageViewer || !!previewLoading || !!preview || (!atMountPoint && pathParts.length > 1),
       handleBack: () => {
         if (imageViewer) setImageViewer(null);
+        else if (previewLoading) setPreviewLoading(null);
         else if (preview) setPreview(null);
         else if (!atMountPoint && pathParts.length > 1) {
           const parent = path.split("/").slice(0, -1).join("/") || "/";
@@ -415,7 +421,7 @@ function FileBrowserInner({
         }
       },
     }),
-    [imageViewer, preview, path, pathParts.length, loadDir, atMountPoint, rootPath],
+    [imageViewer, previewLoading, preview, path, pathParts.length, loadDir, atMountPoint, rootPath],
   );
 
   // ─── Image viewer overlay ─────────────────────────────────────────────────
@@ -427,6 +433,27 @@ function FileBrowserInner({
         initialIndex={imageViewer.index}
         onClose={() => setImageViewer(null)}
       />
+    );
+  }
+
+  if (previewLoading) {
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          flex: 1,
+          gap: 1.5,
+          opacity: 0.7,
+        }}
+      >
+        <CircularProgress size={24} thickness={3} />
+        <Typography variant="body2" color="text.secondary">
+          {previewLoading}
+        </Typography>
+      </Box>
     );
   }
 
@@ -466,12 +493,19 @@ function FileBrowserInner({
 
     if (entry.is_image) {
       return (
-        <ImageThumbnail
-          sessionId={sessionId}
-          entry={entry}
-          onClick={() => handleEntryClick(entry)}
-          onLongPress={(target) => setContextMenu({ entry, anchorEl: target })}
-        />
+        <Box
+          sx={{
+            width: size,
+            height: size,
+            borderRadius: `${Math.round(size * 0.3)}px`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: (theme) => `${theme.palette.success.main}1a`,
+          }}
+        >
+          <ImageIcon sx={{ fontSize: Math.round(size * 0.55), color: "success.main" }} />
+        </Box>
       );
     }
 
@@ -867,14 +901,18 @@ function FileBrowserInner({
         fullWidth
         PaperProps={{ sx: { borderRadius: 3 } }}
       >
-        <DialogTitle sx={{ fontWeight: 600 }}>Delete File</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 600 }}>
+          Delete {deleteTarget?.is_dir ? "Folder" : "File"}
+        </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             Are you sure you want to delete{" "}
             <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
               {deleteTarget?.name}
             </Box>
-            ? This action cannot be undone.
+            ?{deleteTarget?.is_dir
+              ? " All contents inside will be permanently removed."
+              : " This action cannot be undone."}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 0, gap: 1 }}>

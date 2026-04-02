@@ -62,8 +62,6 @@ pub fn run() {
             commands::sftp_save_file,
             commands::sftp_create_dir,
             commands::sftp_upload_file,
-            commands::sftp_get_thumbnail,
-            commands::sftp_get_thumbnails_batch,
             commands::sftp_cache_image,
             commands::open_file_externally,
             commands::sftp_delete_file,

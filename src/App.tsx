@@ -598,15 +598,12 @@ function App() {
                 </Box>
               </Box>
             )}
-            {bottomTab === 0 ? (
-              <Box sx={{ p: 2, flex: 1 }}>
-                <ServerList onConnect={handleConnect} variant="page" />
-              </Box>
-            ) : (
-              <Box sx={{ p: 2, flex: 1 }}>
-                <KeyManager />
-              </Box>
-            )}
+            <Box sx={{ p: 2, flex: 1, display: bottomTab === 0 ? "block" : "none" }}>
+              <ServerList onConnect={handleConnect} variant="page" />
+            </Box>
+            <Box sx={{ p: 2, flex: 1, display: bottomTab === 1 ? "block" : "none" }}>
+              <KeyManager />
+            </Box>
           </>
         )}
       </Box>
