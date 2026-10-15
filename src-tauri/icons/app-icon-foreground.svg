@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Transparent adaptive-icon foreground: glyph sized so it reads ~48% of the
+       72dp visible circle once Android scales the 108dp layer. Background layer
+       supplies the #1e1e2e navy fill. -->
+  <path d="M384 395 L501 512 L384 629" fill="none" stroke="#89b4fa" stroke-width="75" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M544 629 H640" fill="none" stroke="#cba6f7" stroke-width="75" stroke-linecap="round" />
+</svg>
