@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Alert,
+  AlertTitle,
   AppBar,
   Box,
   ButtonBase,
@@ -20,12 +22,12 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import MenuIcon from "@mui/icons-material/Menu";
 import FolderIcon from "@mui/icons-material/Folder";
 import PowerSettingsNewIcon from "@mui/icons-material/PowerSettingsNew";
 import DnsIcon from "@mui/icons-material/Dns";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
-import SettingsIcon from "@mui/icons-material/Settings";
 import PaletteIcon from "@mui/icons-material/Palette";
 import CheckIcon from "@mui/icons-material/Check";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -200,7 +202,7 @@ function App() {
         display: "flex",
         flexDirection: "column",
         minHeight: "100dvh",
-        bgcolor: "background.default",
+        // No background here — the body paints the base color + ambient glow.
       }}
     >
       {/* Top AppBar */}
@@ -217,6 +219,7 @@ function App() {
         <Toolbar sx={{ minHeight: 56 }}>
           <IconButton
             edge="start"
+            aria-label="Open menu"
             onClick={() => {
               setDrawerOpen(true);
               rootBackCountRef.current = 0;
@@ -226,13 +229,26 @@ function App() {
             <MenuIcon />
           </IconButton>
           {activeSession ? (
-            <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 1, overflow: "hidden" }}>
-              <FolderIcon sx={{ color: "primary.main", fontSize: 22 }} />
-              <Typography variant="subtitle1" fontWeight={600} noWrap sx={{ flex: 1 }}>
+            <Box sx={{ flex: 1, display: "flex", alignItems: "center", gap: 1.25, overflow: "hidden" }}>
+              <Box
+                sx={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: "9px",
+                  display: "grid",
+                  placeItems: "center",
+                  flexShrink: 0,
+                  bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
+                }}
+              >
+                <FolderIcon sx={{ color: "primary.main", fontSize: 18 }} />
+              </Box>
+              <Typography variant="subtitle1" fontWeight={650} noWrap sx={{ flex: 1 }}>
                 {activeSession.serverName}
               </Typography>
               <IconButton
                 size="small"
+                aria-label="View and folder options"
                 onClick={(e) => setDotMenuAnchor(e.currentTarget)}
                 sx={{ color: "text.secondary", flexShrink: 0 }}
               >
@@ -240,6 +256,7 @@ function App() {
               </IconButton>
               <IconButton
                 size="small"
+                aria-label="Disconnect"
                 onClick={handleDisconnect}
                 sx={{ color: "error.main", flexShrink: 0 }}
               >
@@ -247,7 +264,7 @@ function App() {
               </IconButton>
             </Box>
           ) : (
-            <Typography variant="subtitle1" fontWeight={600} sx={{ flex: 1 }}>
+            <Typography variant="subtitle1" fontWeight={650} sx={{ flex: 1 }}>
               OxiDock
             </Typography>
           )}
@@ -262,7 +279,7 @@ function App() {
         anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
         transformOrigin={{ vertical: "top", horizontal: "right" }}
         slotProps={{
-          paper: { sx: { borderRadius: 2, minWidth: 200, mt: 0.5 } },
+          paper: { sx: { minWidth: 200, mt: 0.5 } },
         }}
       >
         <MenuItem
@@ -346,16 +363,13 @@ function App() {
           }}
         >
           <Box>
-            <Typography variant="h6" fontWeight={700}>
+            <Typography variant="h6" fontWeight={650}>
               OxiDock
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              VPS File Browser
+            <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: "0.02em" }}>
+              VPS file browser
             </Typography>
           </Box>
-          <IconButton size="small" sx={{ color: "text.secondary" }}>
-            <SettingsIcon fontSize="small" />
-          </IconButton>
         </Box>
         <Divider sx={{ mb: 0.5 }} />
 
@@ -376,21 +390,22 @@ function App() {
                 setBottomTab(1);
                 setDrawerOpen(false);
               }}
+              sx={{ mx: 1 }}
             >
               <ListItemIcon sx={{ minWidth: 40 }}>
                 <VpnKeyIcon sx={{ fontSize: 20, color: "text.secondary" }} />
               </ListItemIcon>
-              <ListItemText primary="Manage Keys" />
+              <ListItemText primary="Manage keys" />
             </ListItemButton>
           </ListItem>
 
           {/* Theme picker toggle */}
           <ListItem disablePadding>
-            <ListItemButton onClick={() => setThemeExpanded(!themeExpanded)}>
+            <ListItemButton onClick={() => setThemeExpanded(!themeExpanded)} sx={{ mx: 1 }}>
               <ListItemIcon sx={{ minWidth: 40 }}>
                 <PaletteIcon sx={{ fontSize: 20, color: "text.secondary" }} />
               </ListItemIcon>
-              <ListItemText primary="Color Scheme" />
+              <ListItemText primary="Color scheme" />
               {themeExpanded ? (
                 <ExpandLessIcon sx={{ fontSize: 20, color: "text.secondary" }} />
               ) : (
@@ -402,22 +417,22 @@ function App() {
 
         {/* Theme selection list */}
         <Collapse in={themeExpanded}>
-          <List dense disablePadding sx={{ pl: 2 }}>
+          <List dense disablePadding>
             {/* Standalone themes (e.g. Tokyo Night) */}
             {standalone.map((t) => (
               <ListItem key={t.key} disablePadding>
                 <ListItemButton
                   onClick={() => setThemeName(t.key)}
                   selected={themeName === t.key}
-                  sx={{ py: 0.5, borderRadius: "10px", mx: 1 }}
+                  sx={{ py: 0.5, mx: 1 }}
                 >
-                  <ListItemIcon sx={{ minWidth: 32 }}>
+                  <ListItemIcon sx={{ minWidth: 40 }}>
                     <Box
                       sx={{
                         width: 18,
                         height: 18,
                         borderRadius: "6px",
-                        bgcolor: t.key === "tokyonight" ? "#7aa2f7" : "primary.main",
+                        bgcolor: t.swatch,
                         border: 1,
                         borderColor: "divider",
                       }}
@@ -446,15 +461,15 @@ function App() {
                   <ListItem disablePadding>
                     <ListItemButton
                       onClick={() => setCatExpanded(!catExpanded)}
-                      sx={{ py: 0.5, borderRadius: "10px", mx: 1 }}
+                      sx={{ py: 0.5, mx: 1 }}
                     >
-                      <ListItemIcon sx={{ minWidth: 32 }}>
+                      <ListItemIcon sx={{ minWidth: 40 }}>
                         <Box
                           sx={{
                             width: 18,
                             height: 18,
                             borderRadius: "6px",
-                            bgcolor: "#cba6f7",
+                            bgcolor: variants[0]?.swatch ?? "primary.main",
                             border: 1,
                             borderColor: "divider",
                           }}
@@ -467,7 +482,7 @@ function App() {
                           </Typography>
                         }
                       />
-                      {isGroupActive && (
+                      {isGroupActive && !catExpanded && (
                         <CheckIcon sx={{ fontSize: 18, color: "primary.main", mr: 0.5 }} />
                       )}
                       {catExpanded ? (
@@ -479,17 +494,17 @@ function App() {
                   </ListItem>
 
                   <Collapse in={catExpanded}>
-                    <List dense disablePadding sx={{ pl: 2 }}>
+                    <List dense disablePadding>
                       {variants.map((v) => (
                         <ListItem key={v.key} disablePadding>
                           <ListItemButton
                             onClick={() => setThemeName(v.key)}
                             selected={themeName === v.key}
-                            sx={{ py: 0.25, borderRadius: "10px", mx: 1 }}
+                            sx={{ py: 0.5, mx: 1, pl: 9 }}
                           >
                             <ListItemText
                               primary={
-                                <Typography variant="caption" fontWeight={themeName === v.key ? 600 : 400}>
+                                <Typography variant="body2" fontWeight={themeName === v.key ? 600 : 400}>
                                   {v.variant || v.label}
                                 </Typography>
                               }
@@ -516,7 +531,10 @@ function App() {
           overflow: "auto",
           display: "flex",
           flexDirection: "column",
-          pb: !activeSession && !autoConnecting ? "80px" : 0,
+          pb: (t) =>
+            !activeSession && !autoConnecting
+              ? `calc(env(safe-area-inset-bottom, 0px) + ${t.tokens.dock.clearance}px)`
+              : 0,
         }}
       >
         {autoConnecting ? (
@@ -535,11 +553,12 @@ function App() {
               sx={{
                 width: 88,
                 height: 88,
-                borderRadius: "24px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                bgcolor: (theme) => `${theme.palette.primary.main}1a`,
+                borderRadius: (t) => t.tokens.radius.xl,
+                display: "grid",
+                placeItems: "center",
+                bgcolor: (t) => alpha(t.palette.primary.main, 0.12),
+                border: "1px solid",
+                borderColor: (t) => alpha(t.palette.primary.main, 0.22),
                 position: "relative",
               }}
             >
@@ -550,18 +569,22 @@ function App() {
                 sx={{
                   position: "absolute",
                   color: "primary.main",
-                  opacity: 0.6,
+                  opacity: 0.55,
                 }}
               />
             </Box>
             <Box sx={{ textAlign: "center" }}>
-              <Typography variant="h6" fontWeight={600} gutterBottom>
-                Connecting...
+              <Typography variant="h6" fontWeight={650} gutterBottom>
+                Connecting…
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {getDefaultServer()?.name ?? "Default server"}
               </Typography>
-              <Typography variant="caption" color="text.secondary" fontFamily="monospace" sx={{ mt: 0.5, display: "block" }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ mt: 0.5, display: "block", fontFamily: (t) => t.tokens.fontMono }}
+              >
                 {getDefaultServer()?.username}@{getDefaultServer()?.host}
               </Typography>
             </Box>
@@ -580,55 +603,62 @@ function App() {
           <>
             {autoConnectError && (
               <Box sx={{ px: 2, pt: 2 }}>
-                <Box
-                  sx={{
-                    p: 1.5,
-                    borderRadius: 2,
-                    bgcolor: (theme) => `${theme.palette.error.main}1a`,
-                    border: 1,
-                    borderColor: "error.main",
-                  }}
-                >
-                  <Typography variant="body2" color="error.main" fontWeight={500}>
+                <Alert severity="error" variant="outlined">
+                  <AlertTitle sx={{ fontWeight: 600, fontSize: "0.9375rem" }}>
                     Auto-connect failed
-                  </Typography>
-                  <Typography variant="caption" color="error.main" sx={{ opacity: 0.8 }}>
-                    {autoConnectError}
-                  </Typography>
-                </Box>
+                  </AlertTitle>
+                  {autoConnectError}
+                </Alert>
               </Box>
             )}
-            <Box sx={{ p: 2, flex: 1, display: bottomTab === 0 ? "block" : "none" }}>
+            <Box
+              sx={{
+                p: 2,
+                flex: 1,
+                display: bottomTab === 0 ? "flex" : "none",
+                flexDirection: "column",
+              }}
+            >
               <ServerList onConnect={handleConnect} variant="page" />
             </Box>
-            <Box sx={{ p: 2, flex: 1, display: bottomTab === 1 ? "block" : "none" }}>
+            <Box
+              sx={{
+                p: 2,
+                flex: 1,
+                display: bottomTab === 1 ? "flex" : "none",
+                flexDirection: "column",
+              }}
+            >
               <KeyManager />
             </Box>
           </>
         )}
       </Box>
 
-      {/* Glass Blur Dock — only when not connected */}
+      {/* Glass dock — only when not connected */}
       {!activeSession && !autoConnecting && (
         <Box
+          component="nav"
+          aria-label="Primary"
           sx={{
             position: "fixed",
-            bottom: 16,
+            zIndex: (t) => t.tokens.z.dock,
+            bottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)",
             left: "50%",
+            width: { xs: "min(320px, calc(100% - 64px))", sm: "auto" },
             transform: "translateX(-50%)",
-            zIndex: 1200,
             display: "flex",
-            justifyContent: "center",
-            gap: 1,
-            px: 3,
-            py: 1,
-            borderRadius: "9999px",
-            backdropFilter: "blur(24px)",
-            WebkitBackdropFilter: "blur(24px)",
-            bgcolor: "rgba(30, 30, 46, 0.55)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.35)",
-            mb: "env(safe-area-inset-bottom, 0px)",
+            alignItems: "center",
+            gap: 0.75,
+            p: 0.75,
+            borderRadius: (t) => t.tokens.radius.pill,
+            bgcolor: (t) => t.tokens.glass.bg,
+            border: "1px solid",
+            borderColor: (t) => t.tokens.glass.border,
+            boxShadow: (t) => t.tokens.glass.shadow,
+            // No backdrop-filter: with an 86%-opaque fill the blur is invisible,
+            // and fixed backdrop-filter layers corrupt on some WebView compositors
+            // (reproducible in software-rendered Chromium after tab switches).
           }}
         >
           {[
@@ -639,28 +669,36 @@ function App() {
             return (
               <ButtonBase
                 key={tab.index}
+                aria-label={tab.label}
+                aria-current={isActive ? "page" : undefined}
                 onClick={() => setBottomTab(tab.index)}
                 sx={{
-                  flex: 1,
+                  flex: { xs: 1, sm: "0 0 auto" },
+                  width: { sm: 116 },
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  gap: 0.3,
-                  py: 0.8,
-                  px: 2,
-                  borderRadius: "14px",
-                  bgcolor: isActive
-                    ? "rgba(255, 255, 255, 0.1)"
-                    : "transparent",
-                  color: isActive ? "primary.main" : "text.secondary",
-                  transition: "all 0.25s ease",
+                  justifyContent: "center",
+                  gap: 0.4,
+                  py: 0.9,
+                  px: 1.5,
+                  borderRadius: (t) => t.tokens.radius.md,
+                  bgcolor: (t) => (isActive ? t.tokens.glass.activeFill : "transparent"),
+                  color: isActive
+                    ? "primary.main"
+                    : (t) => alpha(t.palette.text.primary, 0.7),
+                  transition: (t) =>
+                    t.transitions.create(["background-color", "color"], { duration: 200 }),
                   "&:hover": {
-                    bgcolor: "rgba(255, 255, 255, 0.06)",
+                    bgcolor: (t) =>
+                      isActive
+                        ? alpha(t.palette.primary.main, 0.22)
+                        : t.tokens.glass.hoverFill,
                   },
                   "& .MuiSvgIcon-root": {
                     fontSize: 22,
-                    transition: "transform 0.25s ease",
-                    transform: isActive ? "scale(1.1)" : "scale(1)",
+                    transition: "transform 200ms ease",
+                    transform: isActive ? "scale(1.06)" : "scale(1)",
                   },
                 }}
               >
@@ -668,9 +706,9 @@ function App() {
                 <Typography
                   variant="caption"
                   sx={{
-                    fontSize: "0.65rem",
-                    fontWeight: isActive ? 700 : 500,
-                    letterSpacing: 0.3,
+                    fontSize: "0.75rem",
+                    fontWeight: isActive ? 650 : 500,
+                    letterSpacing: "0.01em",
                     lineHeight: 1,
                   }}
                 >
