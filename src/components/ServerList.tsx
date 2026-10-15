@@ -4,8 +4,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   CircularProgress,
   Dialog,
   DialogTitle,
@@ -31,7 +29,6 @@ import {
 import DnsIcon from "@mui/icons-material/Dns";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
-import StorageIcon from "@mui/icons-material/Storage";
 import VpnKeyIcon from "@mui/icons-material/VpnKey";
 import PasswordIcon from "@mui/icons-material/Password";
 import NetworkCheckIcon from "@mui/icons-material/NetworkCheck";
@@ -42,6 +39,7 @@ import {
   removeServer,
   generateId,
 } from "../lib/storage";
+import EmptyState from "./EmptyState";
 
 // Styled icon wrapper matching reference file manager rounded-square style
 function IconWrap({ children, color = "primary.main", bgAlpha = "1a" }: {
@@ -76,7 +74,7 @@ interface Props {
   onClose?: () => void;
 }
 
-export default function ServerList({ onConnect, variant = "page", onClose: _onClose }: Props) {
+export default function ServerList({ onConnect, variant = "page" }: Props) {
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -195,11 +193,13 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
           <ListSubheader
             sx={{
               bgcolor: "transparent",
-              fontWeight: 600,
+              color: "text.secondary",
+              fontWeight: 650,
+              letterSpacing: "0.04em",
               lineHeight: "36px",
             }}
           >
-            SERVERS
+            Servers
           </ListSubheader>
           {servers.map((server) => (
             <ListItem
@@ -222,9 +222,9 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
               <ListItemButton
                 onClick={() => handleConnect(server)}
                 disabled={connecting === server.id}
-                sx={{ py: 1 }}
+                sx={{ py: 1, mx: 1 }}
               >
-                <ListItemIcon sx={{ minWidth: 48 }}>
+                <ListItemIcon sx={{ minWidth: 40 }}>
                   <IconWrap color="info.main">
                     <DnsIcon sx={{ fontSize: 20, color: "info.main" }} />
                   </IconWrap>
@@ -236,7 +236,11 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                     </Typography>
                   }
                   secondary={
-                    <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ fontFamily: (t) => t.tokens.fontMono }}
+                    >
                       {server.username}@{server.host}
                     </Typography>
                   }
@@ -245,16 +249,16 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
             </ListItem>
           ))}
           <ListItem disablePadding>
-            <ListItemButton onClick={() => setModalOpen(true)} sx={{ py: 1 }}>
-              <ListItemIcon sx={{ minWidth: 48 }}>
+            <ListItemButton onClick={() => setModalOpen(true)} sx={{ py: 1, mx: 1 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
                 <IconWrap color="primary.main">
                   <AddIcon sx={{ fontSize: 20, color: "primary.main" }} />
                 </IconWrap>
               </ListItemIcon>
               <ListItemText
                 primary={
-                  <Typography variant="body2" color="primary" fontWeight={500}>
-                    Add Server
+                  <Typography variant="body2" color="primary" fontWeight={600}>
+                    Add server
                   </Typography>
                 }
               />
@@ -278,54 +282,33 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
 
   // ── Page variant: full-page card grid ──
   return (
-    <Box>
+    <Box
+      sx={{
+        width: "100%",
+        maxWidth: 720,
+        mx: "auto",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       {error && (
-        <Card sx={{ mb: 2, bgcolor: "error.main", color: "error.contrastText" }}>
-          <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
-            <Typography variant="body2">{error}</Typography>
-          </CardContent>
-        </Card>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
       )}
 
       {servers.length === 0 ? (
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            py: 8,
-            gap: 1.5,
-          }}
-        >
-          <Box
-            sx={{
-              width: 72,
-              height: 72,
-              borderRadius: "20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              bgcolor: "action.hover",
-            }}
-          >
-            <StorageIcon sx={{ fontSize: 36, color: "text.secondary", opacity: 0.6 }} />
-          </Box>
-          <Typography variant="subtitle1" fontWeight={600}>
-            No servers yet
-          </Typography>
-          <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ maxWidth: 240 }}>
-            Add a server to start browsing remote files
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setModalOpen(true)}
-            sx={{ mt: 1 }}
-          >
-            Add Server
-          </Button>
-        </Box>
+        <EmptyState
+          icon={<DnsIcon />}
+          title="No servers yet"
+          body="Add a server profile to browse its files over SFTP."
+          action={
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setModalOpen(true)}>
+              Add server
+            </Button>
+          }
+        />
       ) : (
         <>
           <List disablePadding sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
@@ -347,9 +330,8 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                         handleConnect(server);
                       }}
                       sx={{
-                        borderRadius: "20px",
-                        textTransform: "none",
-                        fontWeight: 500,
+                        borderRadius: (t) => t.tokens.radius.pill,
+                        fontWeight: 600,
                         px: 2,
                         mr: -1,
                       }}
@@ -374,8 +356,8 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                       <Typography
                         component="span"
                         variant="caption"
-                        fontFamily="monospace"
                         color="text.secondary"
+                        sx={{ fontFamily: (t) => t.tokens.fontMono }}
                       >
                         {server.username}@{server.host}:{server.port}
                       </Typography>
@@ -387,12 +369,13 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
           </List>
           <Fab
             color="primary"
+            aria-label="Add server"
             size="medium"
             onClick={() => setModalOpen(true)}
             sx={{
               position: "fixed",
-              bottom: 80,
               right: 20,
+              bottom: (t) => `calc(env(safe-area-inset-bottom, 0px) + ${t.tokens.dock.fabOffset}px)`,
             }}
           >
             <AddIcon />
@@ -413,7 +396,7 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Add Server</DialogTitle>
+        <DialogTitle>Add server</DialogTitle>
         <Divider />
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
@@ -464,7 +447,7 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
               onChange={(_e, val) => { if (val) setNewAuthMethod(val as AuthMethod); }}
               fullWidth
               size="small"
-              sx={{ borderRadius: "12px" }}
+              sx={{ borderRadius: (t) => t.tokens.radius.md }}
             >
               <ToggleButton
                 value="key"
@@ -554,7 +537,7 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                 severity={testResult.ok ? "success" : "error"}
                 variant="outlined"
                 onClose={() => setTestResult(null)}
-                sx={{ borderRadius: 2 }}
+                sx={{ borderRadius: (t) => t.tokens.radius.sm }}
               >
                 {testResult.message}
               </Alert>
@@ -570,9 +553,9 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                   (newAuthMethod === "key" ? !newKey : !newPassword)
                 }
                 startIcon={testing ? <CircularProgress size={18} /> : <NetworkCheckIcon />}
-                sx={{ flex: 1, textTransform: "none" }}
+                sx={{ flex: 1 }}
               >
-                {testing ? "Testing..." : "Test"}
+                {testing ? "Testing…" : "Test connection"}
               </Button>
               <Button
                 id="save-server-btn"
@@ -587,7 +570,7 @@ export default function ServerList({ onConnect, variant = "page", onClose: _onCl
                 }
                 sx={{ flex: 1 }}
               >
-                Add Server
+                Add server
               </Button>
             </Box>
           </Stack>

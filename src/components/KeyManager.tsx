@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
   Dialog,
@@ -28,6 +29,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import FingerprintIcon from "@mui/icons-material/Fingerprint";
 import type { KeyInfo } from "../lib/types";
 import { checkBiometricAvailable, requireBiometric } from "../lib/useBiometric";
+import EmptyState from "./EmptyState";
 
 /* ── Center scale + fade transition ─────────────────────────────── */
 const GrowTransition = forwardRef(function GrowTransition(
@@ -164,39 +166,29 @@ export default function KeyManager() {
   const isFormValid = name.trim().length > 0 && keyPem.trim().length > 0;
 
   return (
-    <Box sx={{ position: "relative", minHeight: "100%" }}>
+    <Box
+      sx={{
+        position: "relative",
+        width: "100%",
+        maxWidth: 720,
+        mx: "auto",
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       {/* Key list */}
       {keys.length === 0 ? (
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            py: 8,
-            gap: 1.5,
-          }}
-        >
-          <Box
-            sx={{
-              width: 72,
-              height: 72,
-              borderRadius: "20px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              bgcolor: "action.hover",
-            }}
-          >
-            <VpnKeyIcon sx={{ fontSize: 36, color: "text.secondary", opacity: 0.6 }} />
-          </Box>
-          <Typography variant="subtitle1" fontWeight={600}>
-            No SSH keys yet
-          </Typography>
-          <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ maxWidth: 240 }}>
-            Add a key to connect to your servers securely
-          </Typography>
-        </Box>
+        <EmptyState
+          icon={<VpnKeyIcon />}
+          title="No SSH keys yet"
+          body="Add a private key to connect to your servers."
+          action={
+            <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenForm}>
+              Add key
+            </Button>
+          }
+        />
       ) : (
         <List disablePadding sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
           {keys.map((key) => (
@@ -207,6 +199,7 @@ export default function KeyManager() {
                 <IconButton
                   color="error"
                   size="small"
+                  aria-label={`Delete key ${key.name}`}
                   onClick={() => handleDeleteKey(key.name)}
                 >
                   <DeleteOutlineIcon fontSize="small" />
@@ -232,12 +225,13 @@ export default function KeyManager() {
                 <ListItemText
                   primary={
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                      {key.name}
+                      <Typography variant="body1" fontWeight={600}>
+                        {key.name}
+                      </Typography>
                       <Chip
                         label={KEY_TYPE_LABELS[key.key_type] ?? key.key_type}
                         color={KEY_TYPE_COLORS[key.key_type] ?? "default"}
                         size="small"
-                        sx={{ height: 20, fontSize: "0.65rem", fontWeight: 700 }}
                       />
                     </Box>
                   }
@@ -246,9 +240,9 @@ export default function KeyManager() {
                       <Typography
                         component="span"
                         variant="caption"
-                        fontFamily="monospace"
                         color="text.secondary"
                         display="block"
+                        sx={{ fontFamily: (t) => t.tokens.fontMono }}
                       >
                         {key.fingerprint}
                       </Typography>
@@ -256,6 +250,7 @@ export default function KeyManager() {
                         component="span"
                         variant="caption"
                         color="text.secondary"
+                        sx={{ fontVariantNumeric: "tabular-nums" }}
                       >
                         Added {new Date(key.created_at).toLocaleDateString()}
                       </Typography>
@@ -268,21 +263,24 @@ export default function KeyManager() {
         </List>
       )}
 
-      {/* FAB to add key */}
-      <Fab
-        color="primary"
-        size="medium"
-        onClick={handleOpenForm}
-        sx={{
-          position: "fixed",
-          bottom: 80,
-          right: 20,
-          transition: "transform 0.2s ease, box-shadow 0.2s ease",
-          "&:active": { transform: "scale(0.92)" },
-        }}
-      >
-        <AddIcon />
-      </Fab>
+      {/* FAB to add key — hidden while the empty state shows its own CTA */}
+      {keys.length > 0 && (
+        <Fab
+          color="primary"
+          size="medium"
+          aria-label="Add key"
+          onClick={handleOpenForm}
+          sx={{
+            position: "fixed",
+            right: 20,
+            bottom: (t) => `calc(env(safe-area-inset-bottom, 0px) + ${t.tokens.dock.fabOffset}px)`,
+            transition: "transform 0.2s ease",
+            "&:active": { transform: "scale(0.92)" },
+          }}
+        >
+          <AddIcon />
+        </Fab>
+      )}
 
       {/* ── Centered popup Dialog ──────────────────────────────────── */}
       <Dialog
@@ -295,22 +293,11 @@ export default function KeyManager() {
         PaperProps={{
           sx: {
             m: 2,
-            borderRadius: "20px",
+            borderRadius: (t) => t.tokens.radius.xl,
             bgcolor: "background.paper",
             backgroundImage: "none",
             maxHeight: "85dvh",
             overflow: "auto",
-          },
-        }}
-        sx={{
-          "& .MuiDialog-container": {
-            alignItems: "center",
-            justifyContent: "center",
-          },
-          "& .MuiBackdrop-root": {
-            backgroundColor: "rgba(0,0,0,0.45)",
-            backdropFilter: "blur(4px)",
-            transition: "opacity 0.35s ease !important",
           },
         }}
       >
@@ -327,7 +314,7 @@ export default function KeyManager() {
             sx={{
               width: 36,
               height: 4,
-              borderRadius: 2,
+              borderRadius: (t) => t.tokens.radius.pill,
               bgcolor: "text.secondary",
               opacity: 0.25,
             }}
@@ -344,11 +331,12 @@ export default function KeyManager() {
             pb: 1,
           }}
         >
-          <Typography variant="h6" fontWeight={700} sx={{ fontSize: "1.1rem" }}>
-            Add New Key
+          <Typography variant="h6" fontWeight={650} sx={{ fontSize: "1.0625rem" }}>
+            Add SSH key
           </Typography>
           <IconButton
             size="small"
+            aria-label="Close"
             onClick={handleCloseForm}
             sx={{
               color: "text.secondary",
@@ -386,7 +374,7 @@ export default function KeyManager() {
             onChange={(e) => setKeyPem(e.target.value)}
             sx={{
               "& textarea": {
-                fontFamily: "monospace",
+                fontFamily: (t) => t.tokens.fontMono,
                 fontSize: "0.8rem",
                 lineHeight: 1.5,
               },
@@ -400,59 +388,18 @@ export default function KeyManager() {
           )}
 
           {/* Action buttons */}
-          <Stack direction="row" spacing={1.5} sx={{ pt: 0.5 }}>
-            <Box
-              onClick={handleStoreKey}
-              component="button"
-              sx={{
-                flex: 1,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 1,
-                px: 2,
-                py: 1.4,
-                border: "none",
-                borderRadius: "14px",
-                bgcolor: "primary.main",
-                color: "primary.contrastText",
-                fontWeight: 600,
-                fontSize: "0.9rem",
-                cursor: "pointer",
-                opacity: !isFormValid || loading ? 0.5 : 1,
-                pointerEvents: !isFormValid || loading ? "none" : "auto",
-                transition: "opacity 0.2s, transform 0.15s, background-color 0.2s",
-                "&:hover": { bgcolor: "primary.light" },
-                "&:active": { transform: "scale(0.97)" },
-              }}
-            >
-              {loading && <CircularProgress size={18} color="inherit" />}
-              {loading ? "Saving…" : "Save Key"}
-            </Box>
-            <Box
-              onClick={handleCloseForm}
-              component="button"
-              sx={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                px: 2.5,
-                py: 1.4,
-                border: 1,
-                borderColor: "divider",
-                borderRadius: "14px",
-                bgcolor: "transparent",
-                color: "text.primary",
-                fontWeight: 500,
-                fontSize: "0.9rem",
-                cursor: "pointer",
-                transition: "background-color 0.2s, transform 0.15s",
-                "&:hover": { bgcolor: "action.hover" },
-                "&:active": { transform: "scale(0.97)" },
-              }}
-            >
+          <Stack direction="row" spacing={1} sx={{ pt: 0.5, justifyContent: "flex-end" }}>
+            <Button onClick={handleCloseForm} disabled={loading} color="inherit">
               Cancel
-            </Box>
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleStoreKey}
+              disabled={!isFormValid || loading}
+              startIcon={loading ? <CircularProgress size={16} color="inherit" /> : undefined}
+            >
+              {loading ? "Saving…" : "Save key"}
+            </Button>
           </Stack>
         </Stack>
       </Dialog>
@@ -471,21 +418,10 @@ export default function KeyManager() {
         PaperProps={{
           sx: {
             m: 2,
-            borderRadius: "20px",
+            borderRadius: (t) => t.tokens.radius.xl,
             bgcolor: "background.paper",
             backgroundImage: "none",
             maxHeight: "80dvh",
-          },
-        }}
-        sx={{
-          "& .MuiDialog-container": {
-            alignItems: "center",
-            justifyContent: "center",
-          },
-          "& .MuiBackdrop-root": {
-            backgroundColor: "rgba(0,0,0,0.45)",
-            backdropFilter: "blur(4px)",
-            transition: "opacity 0.35s ease !important",
           },
         }}
       >
@@ -495,7 +431,7 @@ export default function KeyManager() {
             sx={{
               width: 36,
               height: 4,
-              borderRadius: 2,
+              borderRadius: (t) => t.tokens.radius.pill,
               bgcolor: "text.secondary",
               opacity: 0.25,
             }}
@@ -514,12 +450,13 @@ export default function KeyManager() {
         >
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <FingerprintIcon sx={{ color: "success.main", fontSize: 22 }} />
-            <Typography variant="h6" fontWeight={700} sx={{ fontSize: "1.1rem" }}>
-              Key Details
+            <Typography variant="h6" fontWeight={650} sx={{ fontSize: "1.0625rem" }}>
+              Key details
             </Typography>
           </Box>
           <IconButton
             size="small"
+            aria-label="Close"
             onClick={() => setViewingKey(null)}
             sx={{
               color: "text.secondary",
@@ -561,8 +498,7 @@ export default function KeyManager() {
               </Typography>
               <Typography
                 variant="body2"
-                fontFamily="monospace"
-                sx={{ wordBreak: "break-all" }}
+                sx={{ wordBreak: "break-all", fontFamily: (t) => t.tokens.fontMono, fontSize: "0.75rem" }}
               >
                 {viewingKey.fingerprint}
               </Typography>
@@ -571,29 +507,33 @@ export default function KeyManager() {
               <Typography variant="caption" color="text.secondary">
                 Created
               </Typography>
-              <Typography variant="body2">
+              <Typography variant="body2" sx={{ fontVariantNumeric: "tabular-nums" }}>
                 {new Date(viewingKey.created_at).toLocaleString()}
               </Typography>
             </Box>
             {viewingKeyPem && (
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  Secret Key (PEM)
+                  Private key (PEM)
                 </Typography>
                 <Box
                   sx={{
                     p: 1.5,
                     mt: 0.5,
                     bgcolor: "action.hover",
-                    borderRadius: 2,
+                    borderRadius: (t) => t.tokens.radius.sm,
                     maxHeight: 200,
                     overflowY: "auto",
                   }}
                 >
                   <Typography
                     variant="body2"
-                    fontFamily="monospace"
-                    sx={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}
+                    sx={{
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-all",
+                      fontFamily: (t) => t.tokens.fontMono,
+                      fontSize: "0.75rem",
+                    }}
                   >
                     {viewingKeyPem}
                   </Typography>
@@ -615,7 +555,7 @@ export default function KeyManager() {
           onClose={() => setSnackMsg(null)}
           severity="warning"
           variant="filled"
-          sx={{ width: "100%", borderRadius: "14px" }}
+          sx={{ width: "100%", borderRadius: (t) => t.tokens.radius.md }}
         >
           {snackMsg}
         </Alert>
