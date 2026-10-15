@@ -30,9 +30,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <Typography
       variant="caption"
-      fontWeight={600}
+      fontWeight={650}
       color="text.secondary"
-      sx={{ px: 0.5, mb: 0.5, display: "block", letterSpacing: 0.3 }}
+      sx={{ px: 0.5, mb: 0.75, display: "block", letterSpacing: "0.06em" }}
     >
       {children}
     </Typography>
@@ -59,7 +59,7 @@ export default function ViewOptionsPopover({
       slotProps={{
         paper: {
           sx: {
-            borderRadius: 3,
+            borderRadius: (t) => t.tokens.radius.md,
             width: 280,
             p: 2.5,
             display: "flex",
@@ -83,7 +83,7 @@ export default function ViewOptionsPopover({
               flex: 1,
               gap: 0.5,
               textTransform: "none",
-              borderRadius: "10px !important",
+              borderRadius: (t) => t.tokens.radius.sm,
               border: "none",
               py: 1,
               fontSize: "0.75rem",
@@ -124,7 +124,7 @@ export default function ViewOptionsPopover({
               flex: 1,
               gap: 0.5,
               textTransform: "none",
-              borderRadius: "10px !important",
+              borderRadius: (t) => t.tokens.radius.sm,
               border: "none",
               py: 1,
               fontSize: "0.75rem",

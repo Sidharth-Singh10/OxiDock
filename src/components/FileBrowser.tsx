@@ -11,6 +11,8 @@ import {
   DialogContent,
   DialogTitle,
   Button,
+  Divider,
+  Fab,
   Link,
   List,
   ListItem,
@@ -19,11 +21,15 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  Skeleton,
   Snackbar,
   Stack,
+  TextField,
   Typography,
   Backdrop,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import type { Theme } from "@mui/material/styles";
 import FolderIcon from "@mui/icons-material/Folder";
 import DownloadIcon from "@mui/icons-material/Download";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
@@ -41,10 +47,136 @@ import { saveLastFolder } from "../lib/storage";
 import ImageIcon from "@mui/icons-material/Image";
 import FilePreview from "./FilePreview";
 import ImageViewer from "./ImageViewer";
+import EmptyState from "./EmptyState";
 
 export interface FileBrowserBackHandle {
   canGoBack: () => boolean;
   handleBack: () => void;
+}
+
+/** Resolve a palette path like "warning.main" to its color string. */
+function paletteColor(theme: Theme, path: string): string {
+  const resolved = path.split(".").reduce<unknown>(
+    (acc, key) => (acc as Record<string, unknown> | undefined)?.[key],
+    theme.palette as unknown,
+  );
+  return typeof resolved === "string" ? resolved : theme.palette.text.primary;
+}
+
+/** Rounded-square tinted tile used for entry icons. */
+function IconTile({
+  size,
+  color,
+  children,
+}: {
+  size: number;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        width: size,
+        height: size,
+        borderRadius: `${Math.round(size * 0.3)}px`,
+        display: "grid",
+        placeItems: "center",
+        flexShrink: 0,
+        color,
+        bgcolor: (t) => alpha(paletteColor(t, color), 0.1),
+        "& .MuiSvgIcon-root": { fontSize: Math.round(size * 0.55) },
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/** Layout-shaped loading placeholder for cold directory loads. */
+function ListSkeleton({
+  viewMode,
+  iconSize,
+  itemHeight,
+  gridCardSize,
+}: {
+  viewMode: ViewSettings["viewMode"];
+  iconSize: number;
+  itemHeight: number;
+  gridCardSize: number;
+}) {
+  const widths = ["58%", "72%", "46%", "64%", "52%", "78%", "42%", "68%"];
+
+  if (viewMode === "grid") {
+    return (
+      <Box
+        aria-busy="true"
+        sx={{
+          display: "grid",
+          gridTemplateColumns: `repeat(auto-fill, minmax(${gridCardSize}px, 1fr))`,
+          gap: 1,
+          p: 1.5,
+        }}
+      >
+        {widths.slice(0, 6).map((_, i) => (
+          <Box
+            key={i}
+            sx={{
+              borderRadius: (t) => t.tokens.radius.md,
+              border: 1,
+              borderColor: "divider",
+              bgcolor: "background.paper",
+              p: 1.5,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 1,
+            }}
+          >
+            <Skeleton
+              variant="rounded"
+              width={Math.round(gridCardSize * 0.35)}
+              height={Math.round(gridCardSize * 0.35)}
+              sx={{ borderRadius: "30%" }}
+            />
+            <Skeleton variant="text" width="70%" height={14} />
+            <Skeleton variant="text" width="40%" height={12} />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
+  return (
+    <List dense disablePadding aria-busy="true">
+      {widths.map((w, i) => (
+        <ListItem key={i} disablePadding>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1.5,
+              width: "100%",
+              px: 2,
+              minHeight: itemHeight,
+            }}
+          >
+            <Skeleton
+              variant="rounded"
+              width={iconSize}
+              height={iconSize}
+              sx={{ borderRadius: "30%", flexShrink: 0 }}
+            />
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Skeleton variant="text" width={w} height={14} />
+              {viewMode !== "compact" && (
+                <Skeleton variant="text" width="30%" height={12} sx={{ mt: 0.5 }} />
+              )}
+            </Box>
+          </Box>
+        </ListItem>
+      ))}
+    </List>
+  );
 }
 
 interface Props {
@@ -120,8 +252,6 @@ function formatDirLabel(entry: FileEntry, showSize: boolean): string {
 
 function FileBrowserInner({
   sessionId,
-  serverName: _serverName,
-  onDisconnect: _onDisconnect,
   initialPath,
   onBackRef,
   viewSettings,
@@ -475,71 +605,39 @@ function FileBrowserInner({
   const renderEntryIcon = (entry: FileEntry, size = iconSize) => {
     if (entry.is_dir) {
       return (
-        <Box
-          sx={{
-            width: size,
-            height: size,
-            borderRadius: `${Math.round(size * 0.3)}px`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            bgcolor: (theme) => `${theme.palette.warning.main}1a`,
-          }}
-        >
-          <FolderIcon sx={{ fontSize: Math.round(size * 0.55), color: "warning.main" }} />
-        </Box>
+        <IconTile size={size} color="warning.main">
+          <FolderIcon />
+        </IconTile>
       );
     }
 
     if (entry.is_image) {
       return (
-        <Box
-          sx={{
-            width: size,
-            height: size,
-            borderRadius: `${Math.round(size * 0.3)}px`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            bgcolor: (theme) => `${theme.palette.success.main}1a`,
-          }}
-        >
-          <ImageIcon sx={{ fontSize: Math.round(size * 0.55), color: "success.main" }} />
-        </Box>
+        <IconTile size={size} color="success.main">
+          <ImageIcon />
+        </IconTile>
       );
     }
 
     return (
-      <Box
-        sx={{
-          width: size,
-          height: size,
-          borderRadius: `${Math.round(size * 0.3)}px`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          bgcolor: (theme) => `${theme.palette.info.main}1a`,
-        }}
-      >
-        <InsertDriveFileIcon sx={{ fontSize: Math.round(size * 0.55), color: "info.main" }} />
-      </Box>
+      <IconTile size={size} color="info.main">
+        <InsertDriveFileIcon />
+      </IconTile>
     );
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", flex: 1 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", flex: 1, width: "100%" }}>
       {/* Breadcrumb bar */}
       <Box
         sx={{
-          px: 2,
-          py: 1,
           borderBottom: 1,
           borderColor: "divider",
           bgcolor: "background.default",
-          overflow: "auto",
         }}
       >
-        <Breadcrumbs
+        <Box sx={{ px: 2, py: 1, maxWidth: 960, mx: "auto", overflow: "auto" }}>
+          <Breadcrumbs
           sx={{
             "& .MuiBreadcrumbs-ol": { flexWrap: "nowrap" },
           }}
@@ -549,7 +647,7 @@ function FileBrowserInner({
             underline="hover"
             color="text.secondary"
             onClick={() => loadDir("/")}
-            sx={{ fontFamily: "monospace", fontSize: "0.75rem", whiteSpace: "nowrap" }}
+            sx={{ fontFamily: (t) => t.tokens.fontMono, fontSize: "0.75rem", whiteSpace: "nowrap" }}
           >
             /
           </Link>
@@ -564,7 +662,7 @@ function FileBrowserInner({
                 color={isLast ? "primary" : "text.secondary"}
                 onClick={() => loadDir(fullPath)}
                 sx={{
-                  fontFamily: "monospace",
+                  fontFamily: (t) => t.tokens.fontMono,
                   fontSize: "0.75rem",
                   fontWeight: isLast ? 600 : 400,
                   whiteSpace: "nowrap",
@@ -575,44 +673,35 @@ function FileBrowserInner({
             );
           })}
         </Breadcrumbs>
+        </Box>
       </Box>
 
       {/* File list */}
       <Box sx={{ flex: 1, overflow: "auto" }}>
+        <Box
+          sx={{
+            maxWidth: 960,
+            mx: "auto",
+            width: "100%",
+            minHeight: "100%",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
         {loading ? (
-          <Box sx={{ p: 4, textAlign: "center" }}>
-            <CircularProgress size={32} />
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Loading...
-            </Typography>
-          </Box>
-        ) : entries.length === 0 ? (
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              py: 8,
-              gap: 1,
-            }}
-          >
-            <Box
-              sx={{
-                width: 64,
-                height: 64,
-                borderRadius: "18px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                bgcolor: "action.hover",
-              }}
-            >
-              <FolderOpenIcon sx={{ fontSize: 32, color: "text.secondary", opacity: 0.5 }} />
-            </Box>
-            <Typography variant="body1" color="text.secondary">
-              This directory is empty
-            </Typography>
-          </Box>
+          <ListSkeleton
+            viewMode={viewSettings.viewMode}
+            iconSize={iconSize}
+            itemHeight={itemHeight}
+            gridCardSize={gridCardSize}
+          />
+        ) : sortedEntries.length === 0 ? (
+          <EmptyState
+            compact
+            icon={<FolderOpenIcon />}
+            title="This folder is empty"
+            body="Upload a file or create a folder to get started."
+          />
         ) : viewSettings.viewMode === "grid" ? (
           /* ─── Grid view ─────────────────────────────────────────── */
           <Box
@@ -627,7 +716,7 @@ function FileBrowserInner({
               <Card
                 variant="outlined"
                 sx={{
-                  borderRadius: 2,
+                  borderRadius: (t) => t.tokens.radius.md,
                   cursor: "pointer",
                   "&:hover": { bgcolor: "action.hover" },
                 }}
@@ -656,7 +745,7 @@ function FileBrowserInner({
                 key={entry.path}
                 variant="outlined"
                 sx={{
-                  borderRadius: 2,
+                  borderRadius: (t) => t.tokens.radius.md,
                   cursor: "pointer",
                   "&:hover": { bgcolor: "action.hover" },
                 }}
@@ -698,7 +787,7 @@ function FileBrowserInner({
                   >
                     {entry.name}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary" fontSize="0.65rem">
+                  <Typography variant="caption" color="text.secondary" fontSize="0.65rem" sx={{ fontVariantNumeric: "tabular-nums" }}>
                     {entry.is_dir
                       ? formatDirLabel(entry, folderSettings.showFoldersSize)
                       : formatSize(entry.size)}
@@ -714,19 +803,9 @@ function FileBrowserInner({
               <ListItem disablePadding>
                 <ListItemButton onClick={handleNavigateUp} sx={{ minHeight: itemHeight }}>
                   <ListItemIcon sx={{ minWidth: iconSize + 12 }}>
-                    <Box
-                      sx={{
-                        width: iconSize,
-                        height: iconSize,
-                        borderRadius: `${Math.round(iconSize * 0.3)}px`,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        bgcolor: (theme) => `${theme.palette.warning.main}1a`,
-                      }}
-                    >
-                      <FolderOpenIcon sx={{ fontSize: Math.round(iconSize * 0.55), color: "warning.main" }} />
-                    </Box>
+                    <IconTile size={iconSize} color="warning.main">
+                      <FolderOpenIcon />
+                    </IconTile>
                   </ListItemIcon>
                   <ListItemText
                     primary={
@@ -785,7 +864,7 @@ function FileBrowserInner({
                             component="span"
                             variant="caption"
                             color="text.secondary"
-                            fontFamily="monospace"
+                            sx={{ fontFamily: (t) => t.tokens.fontMono, fontVariantNumeric: "tabular-nums" }}
                           >
                             {entry.is_dir
                               ? formatDirLabel(entry, folderSettings.showFoldersSize)
@@ -796,6 +875,7 @@ function FileBrowserInner({
                               component="span"
                               variant="caption"
                               color="text.secondary"
+                              sx={{ fontVariantNumeric: "tabular-nums" }}
                             >
                               {new Date(entry.modified).toLocaleDateString()}
                             </Typography>
@@ -809,6 +889,7 @@ function FileBrowserInner({
             ))}
           </List>
         )}
+        </Box>
       </Box>
 
       {/* Context menu */}
@@ -818,10 +899,25 @@ function FileBrowserInner({
         onClose={() => setContextMenu(null)}
         anchorOrigin={{ vertical: "center", horizontal: "center" }}
         transformOrigin={{ vertical: "top", horizontal: "center" }}
-        PaperProps={{
-          sx: { borderRadius: 2, minWidth: 200 },
+        slotProps={{
+          paper: { sx: { minWidth: 210, py: 0.5 } },
         }}
       >
+        {contextMenu && (
+          <>
+            <Box sx={{ px: 2, pt: 1, pb: 0.75 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                noWrap
+                sx={{ display: "block", fontFamily: (t) => t.tokens.fontMono }}
+              >
+                {contextMenu.entry.name}
+              </Typography>
+            </Box>
+            <Divider sx={{ mb: 0.5 }} />
+          </>
+        )}
         <MenuItem onClick={handleOpenFromMenu}>
           <PlayArrowIcon fontSize="small" sx={{ mr: 1.5, color: "primary.main" }} />
           Open
@@ -841,16 +937,29 @@ function FileBrowserInner({
       <Backdrop
         open={isUploading || downloading}
         sx={{
-          zIndex: 2000,
-          flexDirection: "column",
-          gap: 2,
-          bgcolor: "rgba(0, 0, 0, 0.7)",
+          zIndex: (t) => t.tokens.z.overlay,
+          bgcolor: (t) => t.tokens.scrim,
         }}
       >
-        <CircularProgress color="primary" />
-        <Typography variant="h6" color="white" fontWeight="500">
-          {isUploading ? "Uploading file…" : "Downloading…"}
-        </Typography>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            gap: 2,
+            px: 3,
+            py: 2.25,
+            borderRadius: (t) => t.tokens.radius.md,
+            bgcolor: "background.paper",
+            border: 1,
+            borderColor: "divider",
+            boxShadow: (t) => t.tokens.shadow.strong,
+          }}
+        >
+          <CircularProgress size={22} />
+          <Typography variant="body1" fontWeight={600}>
+            {isUploading ? "Uploading file…" : "Downloading…"}
+          </Typography>
+        </Box>
       </Backdrop>
 
       {/* Error Dialog */}
@@ -859,9 +968,8 @@ function FileBrowserInner({
         onClose={() => setError(null)}
         maxWidth="sm"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
       >
-        <DialogTitle sx={{ color: "error.main", fontWeight: 600 }}>Action Failed</DialogTitle>
+        <DialogTitle sx={{ color: "error.main", fontWeight: 650 }}>Action failed</DialogTitle>
         <DialogContent>
           <Typography
             variant="body2"
@@ -870,24 +978,18 @@ function FileBrowserInner({
               wordBreak: "break-word",
               maxHeight: "50vh",
               overflowY: "auto",
-              fontFamily: "monospace",
               p: 1.5,
-              bgcolor: (theme) =>
-                theme.palette.mode === "dark" ? "rgba(0,0,0,0.2)" : "rgba(0,0,0,0.05)",
-              borderRadius: 1,
+              bgcolor: "action.hover",
+              borderRadius: (t) => t.tokens.radius.xs,
+              fontFamily: (t) => t.tokens.fontMono,
+              fontSize: "0.75rem",
             }}
           >
             {error}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 0 }}>
-          <Button
-            onClick={() => setError(null)}
-            variant="contained"
-            color="primary"
-            disableElevation
-            sx={{ borderRadius: 2 }}
-          >
+          <Button onClick={() => setError(null)} variant="contained" color="primary">
             Close
           </Button>
         </DialogActions>
@@ -899,15 +1001,14 @@ function FileBrowserInner({
         onClose={() => setDeleteTarget(null)}
         maxWidth="xs"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
       >
-        <DialogTitle sx={{ fontWeight: 600 }}>
-          Delete {deleteTarget?.is_dir ? "Folder" : "File"}
+        <DialogTitle sx={{ fontWeight: 650 }}>
+          Delete {deleteTarget?.is_dir ? "folder" : "file"}
         </DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             Are you sure you want to delete{" "}
-            <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
+            <Box component="span" sx={{ fontWeight: 600, color: "text.primary", fontFamily: (t) => t.tokens.fontMono }}>
               {deleteTarget?.name}
             </Box>
             ?{deleteTarget?.is_dir
@@ -916,11 +1017,7 @@ function FileBrowserInner({
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, pt: 0, gap: 1 }}>
-          <Button
-            onClick={() => setDeleteTarget(null)}
-            disabled={isDeleting}
-            sx={{ borderRadius: 2 }}
-          >
+          <Button onClick={() => setDeleteTarget(null)} disabled={isDeleting}>
             Cancel
           </Button>
           <Button
@@ -928,8 +1025,6 @@ function FileBrowserInner({
             variant="contained"
             color="error"
             disabled={isDeleting}
-            disableElevation
-            sx={{ borderRadius: 2 }}
             startIcon={isDeleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
             Delete
@@ -941,15 +1036,12 @@ function FileBrowserInner({
       {fabOpen && (
         <Box
           onClick={() => setFabOpen(false)}
+          aria-hidden="true"
           sx={{
             position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            bgcolor: "rgba(0,0,0,0.5)",
-            zIndex: 1300,
-            transition: "opacity 0.2s ease-in-out",
+            inset: 0,
+            bgcolor: (t) => t.tokens.scrim,
+            zIndex: (t) => t.tokens.z.fabBackdrop,
           }}
         />
       )}
@@ -958,13 +1050,13 @@ function FileBrowserInner({
       <Box
         sx={{
           position: "fixed",
-          bottom: 88,
-          right: 24,
-          zIndex: 1400,
+          right: 20,
+          bottom: (t) => `calc(env(safe-area-inset-bottom, 0px) + ${t.tokens.fabOffset}px)`,
+          zIndex: (t) => t.tokens.z.fab,
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-end",
-          gap: 2,
+          gap: 1.5,
         }}
       >
         <Box
@@ -972,150 +1064,113 @@ function FileBrowserInner({
             display: "flex",
             flexDirection: "column",
             alignItems: "flex-end",
-            gap: 2,
+            gap: 1.5,
             opacity: fabOpen ? 1 : 0,
             pointerEvents: fabOpen ? "auto" : "none",
-            transform: fabOpen ? "translateY(0)" : "translateY(24px)",
-            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+            transform: fabOpen ? "translateY(0)" : "translateY(16px)",
+            transition: (t) =>
+              t.transitions.create(["opacity", "transform"], { duration: 200 }),
           }}
         >
-          <Card elevation={4} sx={{ borderRadius: 8, bgcolor: "background.paper", overflow: "hidden" }}>
-            <ListItemButton onClick={handleCreateFolderStart} sx={{ py: 1.5, px: 2.5 }}>
-              <ListItemIcon sx={{ minWidth: 40 }}>
+          <Card
+            sx={{
+              borderRadius: (t) => t.tokens.radius.md,
+              bgcolor: "background.paper",
+              overflow: "hidden",
+              boxShadow: (t) => t.tokens.shadow.medium,
+            }}
+          >
+            <ListItemButton onClick={handleCreateFolderStart} sx={{ py: 1.25, px: 2 }}>
+              <ListItemIcon sx={{ minWidth: 36 }}>
                 <CreateNewFolderIcon color="action" />
               </ListItemIcon>
-              <ListItemText primary="Folder" primaryTypographyProps={{ fontWeight: 500 }} />
+              <ListItemText primary="Folder" primaryTypographyProps={{ fontWeight: 600 }} />
             </ListItemButton>
           </Card>
 
-          <Card elevation={4} sx={{ borderRadius: 8, bgcolor: "background.paper", overflow: "hidden" }}>
-            <ListItemButton onClick={handleUploadFile} sx={{ py: 1.5, px: 2.5 }}>
-              <ListItemIcon sx={{ minWidth: 40 }}>
+          <Card
+            sx={{
+              borderRadius: (t) => t.tokens.radius.md,
+              bgcolor: "background.paper",
+              overflow: "hidden",
+              boxShadow: (t) => t.tokens.shadow.medium,
+            }}
+          >
+            <ListItemButton onClick={handleUploadFile} sx={{ py: 1.25, px: 2 }}>
+              <ListItemIcon sx={{ minWidth: 36 }}>
                 <FileUploadIcon color="action" />
               </ListItemIcon>
-              <ListItemText primary="Upload" primaryTypographyProps={{ fontWeight: 500 }} />
+              <ListItemText primary="Upload" primaryTypographyProps={{ fontWeight: 600 }} />
             </ListItemButton>
           </Card>
         </Box>
 
-        <Box
-          component="button"
+        <Fab
+          color="primary"
+          aria-label={fabOpen ? "Close create menu" : "Create"}
+          aria-expanded={fabOpen}
           onClick={handleFabToggle}
           sx={{
-            width: 64,
-            height: 64,
+            width: 60,
+            height: 60,
             borderRadius: "20px",
-            bgcolor: "primary.main",
-            color: "primary.contrastText",
-            border: "none",
-            outline: "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            cursor: "pointer",
             transform: fabOpen ? "rotate(45deg)" : "rotate(0deg)",
-            transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+            transition: (t) =>
+              `${t.transitions.create("transform", { duration: 250 })}, ${t.transitions.create(
+                "background-color",
+                { duration: 200 },
+              )}`,
             "&:active": {
               transform: fabOpen ? "rotate(45deg) scale(0.95)" : "rotate(0deg) scale(0.95)",
             },
-            "&:hover": { bgcolor: "primary.dark" },
           }}
         >
-          <AddIcon sx={{ fontSize: 36 }} />
-        </Box>
+          <AddIcon sx={{ fontSize: 30 }} />
+        </Fab>
       </Box>
 
       {/* Create Folder Dialog */}
-      {createFolderDialogOpen && (
-        <Box
-          sx={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            bgcolor: "rgba(0,0,0,0.5)",
-            zIndex: 1500,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            p: 2,
-          }}
-        >
-          <Card elevation={8} sx={{ width: "100%", maxWidth: 360, borderRadius: 3 }}>
-            <Box component="form" onSubmit={handleCreateFolderSubmit}>
-              <CardContent sx={{ pt: 3, pb: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                  New Folder
-                </Typography>
-                <input
-                  type="text"
-                  placeholder="Folder name"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  autoFocus
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    marginTop: "8px",
-                    borderRadius: "8px",
-                    border: "1px solid #ccc",
-                    outline: "none",
-                    fontFamily: "inherit",
-                    fontSize: "1rem",
-                    backgroundColor: "var(--mui-palette-background-default)",
-                    color: "var(--mui-palette-text-primary)",
-                  }}
-                />
-              </CardContent>
-              <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pb: 2, gap: 1 }}>
-                <Box
-                  component="button"
-                  type="button"
-                  onClick={() => setCreateFolderDialogOpen(false)}
-                  disabled={isCreatingFolder}
-                  sx={{
-                    px: 2,
-                    py: 1,
-                    border: "none",
-                    bgcolor: "transparent",
-                    color: "primary.main",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    borderRadius: 1,
-                    "&:hover": { bgcolor: "action.hover" },
-                  }}
-                >
-                  Cancel
-                </Box>
-                <Box
-                  component="button"
-                  type="submit"
-                  disabled={!newFolderName.trim() || isCreatingFolder}
-                  sx={{
-                    px: 2,
-                    py: 1,
-                    border: "none",
-                    bgcolor: "primary.main",
-                    color: "primary.contrastText",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    borderRadius: 1,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 1,
-                    opacity: !newFolderName.trim() || isCreatingFolder ? 0.5 : 1,
-                  }}
-                >
-                  {isCreatingFolder && <CircularProgress size={16} color="inherit" />}
-                  Create
-                </Box>
-              </Box>
-            </Box>
-          </Card>
+      <Dialog
+        open={createFolderDialogOpen}
+        onClose={() => {
+          if (!isCreatingFolder) setCreateFolderDialogOpen(false);
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <Box component="form" onSubmit={handleCreateFolderSubmit}>
+          <DialogTitle sx={{ fontWeight: 650 }}>New folder</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              fullWidth
+              label="Folder name"
+              placeholder="e.g. backups"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              sx={{ mt: 1 }}
+            />
+          </DialogContent>
+          <DialogActions sx={{ p: 2, pt: 0, gap: 1 }}>
+            <Button
+              onClick={() => setCreateFolderDialogOpen(false)}
+              disabled={isCreatingFolder}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={!newFolderName.trim() || isCreatingFolder}
+              startIcon={
+                isCreatingFolder ? <CircularProgress size={16} color="inherit" /> : undefined
+              }
+            >
+              Create
+            </Button>
+          </DialogActions>
         </Box>
-      )}
+      </Dialog>
 
       <Snackbar
         open={!!snackbar}

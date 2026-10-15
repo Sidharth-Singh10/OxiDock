@@ -18,6 +18,7 @@ import CodeIcon from "@mui/icons-material/Code";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import type { FilePreview as FilePreviewType } from "../lib/types";
+import EmptyState from "./EmptyState";
 
 interface Props {
   data: FilePreviewType;
@@ -85,6 +86,7 @@ export default function FilePreview({
         <Toolbar sx={{ minHeight: 48, gap: 1 }}>
           <IconButton
             edge="start"
+            aria-label="Back"
             onClick={onBack}
             sx={{ color: "text.primary" }}
           >
@@ -94,10 +96,9 @@ export default function FilePreview({
             sx={{
               width: 32,
               height: 32,
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              borderRadius: (t) => t.tokens.radius.xs,
+              display: "grid",
+              placeItems: "center",
               bgcolor: "action.hover",
               flexShrink: 0,
             }}
@@ -108,7 +109,11 @@ export default function FilePreview({
             <Typography variant="subtitle2" noWrap>
               {filename}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ fontVariantNumeric: "tabular-nums" }}
+            >
               {(data.total_size / 1024).toFixed(1)} KB
               {data.truncated && " · truncated"}
             </Typography>
@@ -116,6 +121,7 @@ export default function FilePreview({
           <Tooltip title="Download file">
             <span>
               <IconButton
+                aria-label="Download file"
                 onClick={handleDownload}
                 disabled={downloading}
                 sx={{ color: "text.primary" }}
@@ -147,7 +153,6 @@ export default function FilePreview({
             sx={{
               m: 1.5,
               p: 2,
-              fontFamily: "monospace",
               fontSize: "0.8rem",
               lineHeight: 1.6,
               whiteSpace: "pre-wrap",
@@ -157,40 +162,19 @@ export default function FilePreview({
               bgcolor: "background.default",
               border: 1,
               borderColor: "divider",
+              borderRadius: (t) => t.tokens.radius.md,
+              fontFamily: (t) => t.tokens.fontMono,
             }}
           >
             {data.content}
           </Paper>
         ) : (
-          <Box
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              py: 8,
-              gap: 1,
-            }}
-          >
-            <Box
-              sx={{
-                width: 64,
-                height: 64,
-                borderRadius: "18px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                bgcolor: "action.hover",
-              }}
-            >
-              <InsertDriveFileIcon sx={{ fontSize: 32, color: "text.secondary", opacity: 0.5 }} />
-            </Box>
-            <Typography variant="body1" color="text.secondary">
-              Binary file — preview not available
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              File size: {(data.total_size / 1024).toFixed(1)} KB
-            </Typography>
-          </Box>
+          <EmptyState
+            compact
+            icon={<InsertDriveFileIcon />}
+            title="No preview available"
+            body={`This file type can't be previewed. File size: ${(data.total_size / 1024).toFixed(1)} KB.`}
+          />
         )}
       </Box>
 

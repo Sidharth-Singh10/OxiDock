@@ -39,7 +39,7 @@ export default function FolderOptionsPopover({
       slotProps={{
         paper: {
           sx: {
-            borderRadius: 3,
+            borderRadius: (t) => t.tokens.radius.md,
             width: 280,
             p: 2.5,
             display: "flex",
@@ -51,9 +51,9 @@ export default function FolderOptionsPopover({
     >
       <Typography
         variant="caption"
-        fontWeight={600}
+        fontWeight={650}
         color="text.secondary"
-        sx={{ px: 0.5, mb: 0.5, letterSpacing: 0.3 }}
+        sx={{ px: 0.5, mb: 0.5, letterSpacing: "0.06em" }}
       >
         Folder options
       </Typography>

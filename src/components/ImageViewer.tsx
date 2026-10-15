@@ -292,7 +292,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
       sx={{
         position: "fixed",
         inset: 0,
-        zIndex: 2000,
+        zIndex: (t) => t.tokens.z.overlay,
         bgcolor: "rgba(0,0,0,0.96)",
         display: "flex",
         flexDirection: "column",
@@ -313,7 +313,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
           flexShrink: 0,
         }}
       >
-        <IconButton onClick={onClose} sx={{ color: "rgba(255,255,255,0.9)" }}>
+        <IconButton aria-label="Close viewer" onClick={onClose} sx={{ color: "rgba(255,255,255,0.9)" }}>
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1, overflow: "hidden" }}>
@@ -329,6 +329,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
           </Typography>
         </Box>
         <IconButton
+          aria-label="Toggle image info"
           onClick={() => setShowInfo((v) => !v)}
           sx={{ color: showInfo ? "primary.main" : "rgba(255,255,255,0.7)" }}
         >
@@ -387,6 +388,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             </Typography>
             <Box
               component="button"
+              aria-label="Retry loading image"
               onClick={() => loadImage(index)}
               sx={{
                 display: "flex",
@@ -394,7 +396,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
                 gap: 1,
                 px: 3,
                 py: 1.5,
-                borderRadius: 2,
+                borderRadius: "10px",
                 bgcolor: "rgba(255,255,255,0.12)",
                 color: "white",
                 border: "none",
@@ -513,6 +515,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         {/* Prev / Next chevrons (visible on non-touch or tablet) */}
         {index > 0 && loadState === "done" && (
           <IconButton
+            aria-label="Previous image"
             onClick={() => goTo(index - 1)}
             sx={{
               position: "absolute",
@@ -527,6 +530,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         )}
         {index < images.length - 1 && loadState === "done" && (
           <IconButton
+            aria-label="Next image"
             onClick={() => goTo(index + 1)}
             sx={{
               position: "absolute",
@@ -563,13 +567,14 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
               gap: 1,
               px: 1.5,
               py: 0.5,
-              borderRadius: 3,
+              borderRadius: "999px",
               bgcolor: "rgba(255,255,255,0.08)",
               backdropFilter: "blur(8px)",
             }}
           >
             <IconButton
               size="small"
+              aria-label="Zoom out"
               onClick={zoomOut}
               disabled={scale <= MIN_SCALE}
               sx={{ color: "rgba(255,255,255,0.7)", "&.Mui-disabled": { color: "rgba(255,255,255,0.2)" } }}
@@ -589,6 +594,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             </Typography>
             <IconButton
               size="small"
+              aria-label="Zoom in"
               onClick={zoomIn}
               disabled={scale >= MAX_SCALE}
               sx={{ color: "rgba(255,255,255,0.7)", "&.Mui-disabled": { color: "rgba(255,255,255,0.2)" } }}
@@ -598,6 +604,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             {scale !== 1 && (
               <IconButton
                 size="small"
+                aria-label="Reset zoom"
                 onClick={zoomReset}
                 sx={{ color: "rgba(255,255,255,0.6)" }}
               >
@@ -620,11 +627,16 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
             {images.map((_, i) => (
               <Box
                 key={i}
+                component="button"
+                aria-label={`Go to image ${i + 1}`}
+                aria-current={i === index ? "true" : undefined}
                 onClick={() => goTo(i)}
                 sx={{
                   width: i === index ? 20 : 6,
                   height: 6,
-                  borderRadius: 3,
+                  p: 0,
+                  border: "none",
+                  borderRadius: "999px",
                   bgcolor: i === index ? "primary.main" : "rgba(255,255,255,0.25)",
                   transition: "all 0.25s ease",
                   cursor: "pointer",
