@@ -6,7 +6,7 @@ import type { ThemeDefinition } from './index';
 interface ThemeContextValue {
   themeName: string;
   setThemeName: (name: string) => void;
-  availableThemes: { key: string; label: string; group?: string; variant?: string }[];
+  availableThemes: { key: string; label: string; group?: string; variant?: string; swatch: string }[];
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
@@ -44,6 +44,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       label: def.label,
       group: def.group,
       variant: def.variant,
+      swatch: def.swatch,
     })),
     [],
   );
