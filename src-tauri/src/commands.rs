@@ -183,24 +183,6 @@ pub async fn sftp_read_file_preview(
 }
 
 #[tauri::command]
-pub async fn sftp_download_file(
-    session_mgr: State<'_, Arc<SshSessionManager>>,
-    session_id: String,
-    path: String,
-) -> AppResult<Vec<u8>> {
-    log::debug!("[CMD] sftp_download_file called — path=\"{}\"", path);
-    let start = std::time::Instant::now();
-    let session = session_mgr.get_session(&session_id).await?;
-    let result = sftp_ops::download_file(&session, &path).await;
-    log::info!(
-        "[CMD] sftp_download_file \"{}\" — total_cmd: {:.2}ms",
-        path,
-        start.elapsed().as_secs_f64() * 1000.0,
-    );
-    result
-}
-
-#[tauri::command]
 pub async fn sftp_save_file(
     app: tauri::AppHandle,
     session_mgr: State<'_, Arc<SshSessionManager>>,
@@ -300,20 +282,56 @@ pub async fn sftp_create_dir(
     result
 }
 
+/// Upload one chunk of a file. The chunk bytes travel as the **raw invoke
+/// body** (no JSON number-array), with metadata in request headers:
+/// `x-session-id`, `x-remote-path` (base64-encoded UTF-8 path), `x-offset`.
 #[tauri::command]
-pub async fn sftp_upload_file(
+pub async fn sftp_upload_chunk(
+    request: tauri::ipc::Request<'_>,
     session_mgr: State<'_, Arc<SshSessionManager>>,
-    session_id: String,
-    remote_path: String,
-    data: Vec<u8>,
 ) -> AppResult<()> {
-    log::debug!("[CMD] sftp_upload_file called — path=\"{}\"", remote_path);
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err(AppError::Other(
+            "sftp_upload_chunk expects raw bytes as the invoke body".into(),
+        ));
+    };
+    let headers = request.headers();
+
+    let header = |name: &str| -> AppResult<String> {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| AppError::Other(format!("Missing or invalid upload header: {name}")))
+    };
+
+    let session_id = header("x-session-id")?;
+    let remote_path = {
+        use base64::Engine as _;
+        let raw = header("x-remote-path")?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(raw)
+            .map_err(|e| AppError::Other(format!("Invalid x-remote-path header: {e}")))?;
+        String::from_utf8(bytes)
+            .map_err(|e| AppError::Other(format!("Invalid UTF-8 in x-remote-path: {e}")))?
+    };
+    let offset: u64 = header("x-offset")?
+        .parse()
+        .map_err(|_| AppError::Other("Invalid x-offset header".into()))?;
+
+    log::debug!(
+        "[CMD] sftp_upload_chunk called — path=\"{}\" offset={} bytes={}",
+        remote_path,
+        offset,
+        data.len(),
+    );
     let start = std::time::Instant::now();
     let session = session_mgr.get_session(&session_id).await?;
-    let result = sftp_ops::upload_file(&session, &remote_path, &data).await;
+    let result = sftp_ops::upload_chunk(&session, &remote_path, offset, data).await;
     log::info!(
-        "[CMD] sftp_upload_file \"{}\" — total_cmd: {:.2}ms",
+        "[CMD] sftp_upload_chunk \"{}\" offset={} — total_cmd: {:.2}ms",
         remote_path,
+        offset,
         start.elapsed().as_secs_f64() * 1000.0,
     );
     result

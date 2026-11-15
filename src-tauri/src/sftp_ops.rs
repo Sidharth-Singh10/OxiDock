@@ -1,8 +1,10 @@
 use serde::Serialize;
+use std::io::SeekFrom;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tokio::io::AsyncWriteExt;
+use russh_sftp::protocol::OpenFlags;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::errors::{AppError, AppResult};
 use crate::ssh_manager::SshSession;
@@ -77,7 +79,8 @@ pub struct FileEntry {
     pub path: String,
     pub is_dir: bool,
     pub size: u64,
-    pub modified: Option<String>,
+    /// Unix epoch **milliseconds**; formatted on the frontend.
+    pub modified: Option<u64>,
     pub is_image: bool,
 }
 
@@ -120,11 +123,8 @@ pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<Fi
         let attrs = &entry.metadata();
         let is_dir = attrs.is_dir();
         let size = attrs.size.unwrap_or(0);
-        let modified = attrs.mtime.map(|t| {
-            chrono::DateTime::from_timestamp(t as i64, 0)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default()
-        });
+        // Raw epoch millis — no per-entry chrono formatting or string allocation.
+        let modified = attrs.mtime.map(|t| t as u64 * 1000);
 
         let is_image = if is_dir { false } else { is_image_ext(&name) };
         files.push(FileEntry {
@@ -137,12 +137,10 @@ pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<Fi
         });
     }
 
-    // Sort: directories first, then by name
-    files.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    // Sort: directories first, then case-insensitive by name.
+    // `sort_by_cached_key` computes the lowercase key once per entry instead of
+    // allocating on every comparison.
+    files.sort_by_cached_key(|e| (!e.is_dir, e.name.to_lowercase()));
 
     let total_ms = total_start.elapsed().as_secs_f64() * 1000.0;
     log::info!(
@@ -158,6 +156,8 @@ pub async fn list_dir(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<Fi
 }
 
 /// Read a file preview (first N bytes).
+/// Only the preview window is transferred — the rest of the file is never
+/// downloaded, so previewing a large file costs `max_bytes`, not file size.
 pub async fn read_file_preview(
     session: &Arc<SshSession>,
     path: &str,
@@ -166,20 +166,60 @@ pub async fn read_file_preview(
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
-    let data = sftp
-        .read(path)
+    // File size first (one stat) so the read window can be sized exactly.
+    let known_size = sftp.metadata(path).await.ok().and_then(|m| m.size);
+
+    let mut file = sftp
+        .open(path)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to read file: {e}")))?;
+        .map_err(|e| AppError::Sftp(format!("Failed to open file: {e}")))?;
+
+    // With a known size, read exactly min(size, max_bytes). Without one, read
+    // one extra byte so truncation can still be detected.
+    let read_target = match known_size {
+        Some(size) => (size as usize).min(max_bytes),
+        None => max_bytes + 1,
+    };
+
+    let mut data: Vec<u8> = Vec::with_capacity(read_target.min(256 * 1024));
+    let mut remaining = read_target;
+    let mut chunk = vec![0u8; 64 * 1024];
+    while remaining > 0 {
+        let want = remaining.min(chunk.len());
+        let n = file
+            .read(&mut chunk[..want])
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to read file: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&chunk[..n]);
+        remaining -= n;
+    }
+    let _ = file.shutdown().await;
+
+    let (truncated, total_size) = match known_size {
+        Some(size) => (size as usize > data.len(), size),
+        None => {
+            let truncated = data.len() > max_bytes;
+            if truncated {
+                data.truncate(max_bytes);
+            }
+            // Size is unknown without a full read; report the bytes we have.
+            (truncated, data.len() as u64)
+        }
+    };
 
     log::info!(
-        "[PERF] read_file_preview \"{}\" — {:.2}ms | size: {} bytes",
+        "[PERF] read_file_preview \"{}\" — {:.2}ms | read: {} bytes | file: {} bytes | truncated: {}",
         path,
         start.elapsed().as_secs_f64() * 1000.0,
         data.len(),
+        total_size,
+        truncated,
     );
 
-    let truncated = data.len() > max_bytes;
-    let preview_data = if truncated { &data[..max_bytes] } else { &data };
+    let preview_data = data.as_slice();
 
     // Try to detect if it's text or binary
     let is_text = preview_data
@@ -192,7 +232,7 @@ pub async fn read_file_preview(
             content: text,
             is_text: true,
             truncated,
-            total_size: data.len() as u64,
+            total_size,
         })
     } else {
         let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, preview_data);
@@ -200,7 +240,7 @@ pub async fn read_file_preview(
             content: b64,
             is_text: false,
             truncated,
-            total_size: data.len() as u64,
+            total_size,
         })
     }
 }
@@ -245,21 +285,43 @@ pub async fn cache_image(
         }
     }
 
-    // Download full image.
+    // Stream the image to disk in chunks — bounded memory for large files.
     let sftp = session.sftp().await?;
-    let data = sftp
-        .read(path)
+    let mut remote = sftp
+        .open(path)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to download image: {e}")))?;
-    tokio::fs::write(&cache_file, &data)
+        .map_err(|e| AppError::Sftp(format!("Failed to open image: {e}")))?;
+    let mut local = tokio::fs::File::create(&cache_file)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to write cached image: {e}")))?;
+        .map_err(|e| AppError::Sftp(format!("Failed to create cache file: {e}")))?;
+
+    let mut buf = vec![0u8; 128 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        let n = remote
+            .read(&mut buf)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to download image: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        local
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to write cached image: {e}")))?;
+        total += n as u64;
+    }
+    local
+        .flush()
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to flush cached image: {e}")))?;
+    let _ = remote.shutdown().await;
 
     log::info!(
         "[PERF] cache_image \"{}\" — {:.2}ms | size: {} bytes",
         path,
         start.elapsed().as_secs_f64() * 1000.0,
-        data.len(),
+        total,
     );
 
     // Background LRU eviction — keep image cache dir under IMAGE_CACHE_MAX_BYTES
@@ -324,27 +386,8 @@ async fn delete_dir_recursive(session: &Arc<SshSession>, dir_path: &str) -> AppR
     Ok(())
 }
 
-/// Download a file via SFTP and return the bytes.
-pub async fn download_file(session: &Arc<SshSession>, path: &str) -> AppResult<Vec<u8>> {
-    let start = std::time::Instant::now();
-    let sftp = session.sftp().await?;
-
-    let data = sftp
-        .read(path)
-        .await
-        .map_err(|e| AppError::Sftp(format!("Failed to download file: {e}")))?;
-
-    log::info!(
-        "[PERF] download_file \"{}\" — {:.2}ms | size: {} bytes",
-        path,
-        start.elapsed().as_secs_f64() * 1000.0,
-        data.len(),
-    );
-
-    Ok(data)
-}
-
 /// Download a remote file via SFTP and save it to a local path.
+/// Streams in chunks so memory stays bounded regardless of file size.
 pub async fn save_file(
     session: &Arc<SshSession>,
     remote_path: &str,
@@ -353,16 +396,35 @@ pub async fn save_file(
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
-    let data = sftp
-        .read(remote_path)
+    let mut remote = sftp
+        .open(remote_path)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to download file: {e}")))?;
-
-    let size = data.len() as u64;
-
-    tokio::fs::write(local_path, &data)
+        .map_err(|e| AppError::Sftp(format!("Failed to open remote file: {e}")))?;
+    let mut local = tokio::fs::File::create(local_path)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to write local file: {e}")))?;
+        .map_err(|e| AppError::Sftp(format!("Failed to create local file: {e}")))?;
+
+    let mut buf = vec![0u8; 128 * 1024];
+    let mut size: u64 = 0;
+    loop {
+        let n = remote
+            .read(&mut buf)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to download file: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        local
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to write local file: {e}")))?;
+        size += n as u64;
+    }
+    local
+        .flush()
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to flush local file: {e}")))?;
+    let _ = remote.shutdown().await;
 
     log::info!(
         "[PERF] save_file \"{}\" -> \"{}\" — {:.2}ms | size: {} bytes",
@@ -393,27 +455,45 @@ pub async fn create_dir(session: &Arc<SshSession>, path: &str) -> AppResult<()> 
     Ok(())
 }
 
-/// Upload file data to a remote path via SFTP.
-pub async fn upload_file(
+/// Upload a single chunk of a file at the given offset.
+/// Chunks arrive as the raw invoke body (see `sftp_upload_chunk`); the first
+/// chunk (offset 0) creates/truncates the file, later chunks seek and write.
+pub async fn upload_chunk(
     session: &Arc<SshSession>,
     remote_path: &str,
+    offset: u64,
     data: &[u8],
 ) -> AppResult<()> {
     let start = std::time::Instant::now();
     let sftp = session.sftp().await?;
 
+    let flags = if offset == 0 {
+        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE
+    } else {
+        OpenFlags::WRITE | OpenFlags::CREATE
+    };
     let mut file = sftp
-        .create(remote_path)
+        .open_with_flags(remote_path, flags)
         .await
-        .map_err(|e| AppError::Sftp(format!("Failed to create file for upload: {e}")))?;
+        .map_err(|e| AppError::Sftp(format!("Failed to open file for upload: {e}")))?;
+
+    if offset > 0 {
+        file.seek(SeekFrom::Start(offset))
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to seek for upload: {e}")))?;
+    }
 
     file.write_all(data)
         .await
         .map_err(|e| AppError::Sftp(format!("Failed to write file data: {e}")))?;
+    file.shutdown()
+        .await
+        .map_err(|e| AppError::Sftp(format!("Failed to close upload handle: {e}")))?;
 
     log::info!(
-        "[PERF] upload_file \"{}\" — {:.2}ms | size: {} bytes",
+        "[PERF] upload_chunk \"{}\" — offset: {} | {:.2}ms | chunk: {} bytes",
         remote_path,
+        offset,
         start.elapsed().as_secs_f64() * 1000.0,
         data.len(),
     );
