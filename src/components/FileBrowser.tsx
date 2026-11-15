@@ -13,6 +13,7 @@ import {
   Button,
   Divider,
   Fab,
+  LinearProgress,
   Link,
   List,
   ListItem,
@@ -204,8 +205,8 @@ function sortEntries(
       case "name":
         return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
       case "date": {
-        const ta = a.modified ? new Date(a.modified).getTime() : 0;
-        const tb = b.modified ? new Date(b.modified).getTime() : 0;
+        const ta = a.modified ?? 0;
+        const tb = b.modified ?? 0;
         return tb - ta;
       }
       case "size":
@@ -241,6 +242,17 @@ function formatSize(bytes: number): string {
     i++;
   }
   return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+/** 4 MB upload chunks: bounded memory and visible progress. */
+const UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
+
+/** Base64-encode a UTF-8 string for use in an ASCII-only request header. */
+function encodeHeaderValue(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
 }
 
 function formatDirLabel(entry: FileEntry, showSize: boolean): string {
@@ -291,6 +303,7 @@ function FileBrowserInner({
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
@@ -352,24 +365,41 @@ function FileBrowserInner({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const remotePath = path === "/" ? `/${file.name}` : `${path}/${file.name}`;
+    const totalChunks = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_SIZE));
+
     try {
       setIsUploading(true);
-      const buffer = await file.arrayBuffer();
-      const remotePath = path === "/" ? `/${file.name}` : `${path}/${file.name}`;
+      setUploadProgress(0);
 
-      await invoke("sftp_upload_file", {
-        sessionId,
-        remotePath,
-        data: Array.from(new Uint8Array(buffer)),
-      });
+      // Chunked raw-body upload: each slice travels as the invoke body, so
+      // large files never become a JSON number array or a single huge buffer.
+      for (let i = 0; i < totalChunks; i++) {
+        const offset = i * UPLOAD_CHUNK_SIZE;
+        const slice = file.slice(offset, Math.min(offset + UPLOAD_CHUNK_SIZE, file.size));
+        const chunk = new Uint8Array(await slice.arrayBuffer());
+
+        await invoke("sftp_upload_chunk", chunk, {
+          headers: {
+            "x-session-id": sessionId,
+            "x-remote-path": encodeHeaderValue(remotePath),
+            "x-offset": String(offset),
+          },
+        });
+
+        setUploadProgress(Math.round(((i + 1) / totalChunks) * 100));
+      }
 
       setSnackbar("File uploaded successfully");
       invalidateDirCache(path);
       loadDir(path);
     } catch (err) {
+      // Best-effort cleanup of the partial remote file.
+      invoke("sftp_delete_file", { sessionId, path: remotePath, isDir: false }).catch(() => {});
       setError(`Upload failed: ${err}`);
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -870,7 +900,7 @@ function FileBrowserInner({
                               ? formatDirLabel(entry, folderSettings.showFoldersSize)
                               : formatSize(entry.size)}
                           </Typography>
-                          {entry.modified && (
+                          {entry.modified != null && (
                             <Typography
                               component="span"
                               variant="caption"
@@ -944,10 +974,11 @@ function FileBrowserInner({
         <Box
           sx={{
             display: "flex",
-            alignItems: "center",
-            gap: 2,
+            flexDirection: "column",
+            gap: 1.5,
             px: 3,
             py: 2.25,
+            minWidth: 260,
             borderRadius: (t) => t.tokens.radius.md,
             bgcolor: "background.paper",
             border: 1,
@@ -955,10 +986,28 @@ function FileBrowserInner({
             boxShadow: (t) => t.tokens.shadow.strong,
           }}
         >
-          <CircularProgress size={22} />
-          <Typography variant="body1" fontWeight={600}>
-            {isUploading ? "Uploading file…" : "Downloading…"}
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <CircularProgress size={20} />
+            <Typography variant="body1" fontWeight={600} sx={{ flex: 1 }}>
+              {isUploading ? "Uploading…" : "Downloading…"}
+            </Typography>
+            {isUploading && uploadProgress != null && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ fontVariantNumeric: "tabular-nums" }}
+              >
+                {uploadProgress}%
+              </Typography>
+            )}
+          </Box>
+          {isUploading && uploadProgress != null && (
+            <LinearProgress
+              variant="determinate"
+              value={uploadProgress}
+              sx={{ borderRadius: 999, height: 6 }}
+            />
+          )}
         </Box>
       </Backdrop>
 

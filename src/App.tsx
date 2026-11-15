@@ -43,6 +43,7 @@ import FileBrowser, { type FileBrowserBackHandle } from "./components/FileBrowse
 import ViewOptionsPopover from "./components/ViewOptionsPopover";
 import FolderOptionsPopover from "./components/FolderOptionsPopover";
 import { useAppTheme } from "./theme/ThemeContext";
+import { clearCache } from "./lib/imageCache";
 import {
   getDefaultServer,
   loadViewSettings,
@@ -182,12 +183,15 @@ function App() {
   }, []);
 
   const handleConnect = (sessionId: string, serverName: string, mountPoint?: string) => {
+    // A new session starts with clean caches (listings are keyed by path only).
+    clearCache();
     setActiveSession({ sessionId, serverName, mountPoint });
     setAutoConnectError(null);
     setDrawerOpen(false);
   };
 
   const handleDisconnect = () => {
+    clearCache();
     setActiveSession(null);
   };
 

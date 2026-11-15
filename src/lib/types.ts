@@ -14,7 +14,8 @@ export interface FileEntry {
   path: string;
   is_dir: boolean;
   size: number;
-  modified: string | null;
+  /** Unix epoch milliseconds, or null when unknown. */
+  modified: number | null;
   is_image: boolean;
 }
 

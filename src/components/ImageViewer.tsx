@@ -119,9 +119,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         if (isCached(img.path)) {
           localPath = getCached(img.path)!;
         } else {
-          const remoteMtime = img.modified
-            ? Math.floor(new Date(img.modified).getTime() / 1000)
-            : undefined;
+          const remoteMtime = img.modified != null ? Math.floor(img.modified / 1000) : undefined;
 
           localPath = await invoke<string>("sftp_cache_image", {
             sessionId,
@@ -142,9 +140,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
         const preload = (idx: number) => {
           const neighbour = images[idx];
           if (neighbour && !isCached(neighbour.path)) {
-            const mtime = neighbour.modified
-              ? Math.floor(new Date(neighbour.modified).getTime() / 1000)
-              : undefined;
+            const mtime = neighbour.modified != null ? Math.floor(neighbour.modified / 1000) : undefined;
             invoke<string>("sftp_cache_image", {
               sessionId,
               path: neighbour.path,
@@ -490,7 +486,7 @@ export default function ImageViewer({ sessionId, images, initialIndex, onClose }
               </Typography>
             </Box>
 
-            {entry?.modified && (
+            {entry?.modified != null && (
               <Box>
                 <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)" }}>
                   Modified
